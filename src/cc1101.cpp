@@ -347,9 +347,13 @@ void cc1101::setup() {
 
 #ifdef RADIO_CTX
 for (uint8_t r = 0; r < NUM_RADIO; r++) {      // all CS high before SPI is used, else more cc1101 answer
-	pinAsOutput(radioCsPin[r]);
-	digitalHigh(radioCsPin[r]);
-	pinAsInput(radioPinReceive[r]);                 // gdo2
+	if (radioCsPin[r] != RADIO_NO_PIN) {
+		pinAsOutput(radioCsPin[r]);
+		digitalHigh(radioCsPin[r]);
+	}
+	if (radioPinReceive[r] != RADIO_NO_PIN) {
+		pinAsInput(radioPinReceive[r]);               // gdo2
+	}
 	if (radioPinSend[r] != RADIO_NO_PIN) {
 		pinAsInput(radioPinSend[r]);                  // gdo0, sicherheitshalber bis zum CC1101 init erstmal input
 	}
@@ -377,7 +381,11 @@ pinAsOutput(csPin);                // set pins for SPI communication
 #else
 	SPI.setDataMode(SPI_MODE0);
 	SPI.setBitOrder(MSBFIRST);
+#ifdef RADIO_PIN_CFG
+	SPI.begin(sckPin, misoPin, mosiPin, -1);   // configurable pins, CS is handled per radio
+#else
 	SPI.begin();
+#endif
 	SPI.setClockDivider(SPI_CLOCK_DIV4);
 #endif
 #ifndef RADIO_CTX

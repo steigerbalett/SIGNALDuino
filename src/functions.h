@@ -173,7 +173,7 @@ void disableReceive() {
     if (afc == 0) { // reset AFC
       cc1101::freqOffAcc = 0;
       cc1101::freqErrAvg = 0;
-      cc1101::writeReg(static_cast<uint8_t>(0x0C), static_cast<uint8_t>(afc) ); // reset 0x0C: FSCTRL0 – Frequency Synthesizer Control
+      if (hasCC1101) cc1101::writeReg(static_cast<uint8_t>(0x0C), static_cast<uint8_t>(afc) ); // reset 0x0C: FSCTRL0 – Frequency Synthesizer Control
     }
     #if defined (ESP8266) || defined (ESP32)
       if (wmb == 1) { // WMBus
@@ -229,16 +229,22 @@ void dumpEEPROM() {
   #endif
 }
 
-void initEEPROM(void) { 
-  #if defined(ESP8266) || defined(ESP32)
+#if defined(ESP8266) || defined(ESP32)
+void eeBegin() {                    // called once per radio and before the pins are loaded
   #ifndef EE_SIZE
     #define EE_SIZE 512
   #endif
-  static bool eeBegin = false;
-  if (!eeBegin) {                   // initEEPROM is called once per radio
+  static bool begun = false;
+  if (!begun) {
     EEPROM.begin(EE_SIZE); //Max bytes of eeprom to use
-    eeBegin = true;
+    begun = true;
   }
+}
+#endif
+
+void initEEPROM(void) { 
+  #if defined(ESP8266) || defined(ESP32)
+  eeBegin();
   #endif
   if (EEPROM.read(EEADR(EE_MAGIC_OFFSET)) == VERSION_1 && EEPROM.read(EEADR(EE_MAGIC_OFFSET + 1)) == VERSION_2) {
     DBG_PRINT(F("Reading values from ")); DBG_PRINT(FPSTR(TXT_EEPROM)); DBG_PRINT(FPSTR(TXT_DOT)); DBG_PRINT(FPSTR(TXT_DOT));

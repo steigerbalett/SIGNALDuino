@@ -55,7 +55,12 @@ Modules 2-4 are only used if a CC1101 is detected at boot. Pinout (compatible to
 | 4 | 26 | 33 | - | 21 |
 
 SCK 18, MISO 19, MOSI 23 are shared. Modules without GDO0 receive ASK/OOK and xFSK, but can only send xFSK and cannot use WMBus.
-WMBus can be used on one module at a time. Pins can be changed with `RADIO_CS_PINS`, `RADIO_SEND_PINS`, `RADIO_RECEIVE_PINS` and the number of modules with `NUM_RADIO` (build flags, see `src/radio.h`).
+WMBus can be used on one module at a time. All pins (SCK, MISO, MOSI, CS/GDO0/GDO2 per module) can be changed in the web configuration (active after reboot, module without CS = not used). Default pins can be changed with `RADIO_CS_PINS`, `RADIO_SEND_PINS`, `RADIO_RECEIVE_PINS` and the number of modules with `NUM_RADIO` (build flags, see `src/radio.h`).
+
+### ESP32 builds (GitHub Actions)
+
+`.github/workflows/esp32.yml` builds `esp32cc1101` and `esp32s` on every push and pull request. The artifacts contain
+`SIGNALDuino_<env>*.bin` for the OTA update (`/update`) and `SIGNALDuino_<env>*_factory.bin` to flash via USB at address 0x0.
 
 ### Signal from my device ist not detected
 

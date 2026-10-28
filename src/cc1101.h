@@ -50,9 +50,9 @@ namespace cc1101 {
 	#define sckPin  30                             // SCLK out - SPI2
 #elif defined(RADIO_CTX)
 	#define csPin   radioCsPin[curRadio]   // CSN  out, one per radio
-	#define mosiPin MOSI   // MOSI out
-	#define misoPin MISO   // MISO in
-	#define sckPin  SCK    // SCLK out
+	#define mosiPin radioSpiPin[2]         // MOSI out
+	#define misoPin radioSpiPin[1]         // MISO in
+	#define sckPin  radioSpiPin[0]         // SCLK out
 #else
 	#define csPin   SS     // CSN  out
 	#define mosiPin MOSI   // MOSI out

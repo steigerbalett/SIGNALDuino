@@ -26,7 +26,7 @@
 #define EE_BANK_COUNT          10
 #define EE_BANK_MARK           0xB5
 #define EE_BANK_NAMELEN        12
-#define EE_SIZE                (EE_RADIO_BASE + NUM_RADIO * EE_RADIO_SIZE) // banks end at 0x3A0, then radio 2-4 (radio.h)
+#define EE_SIZE                0x480 // banks end at 0x3A0, then radio 2-4 and pins (radio.h)
 #define MAX_SRV_CLIENTS        2
 
 void serialEvent();
@@ -66,6 +66,22 @@ size_t writeCallback(const uint8_t *buf, uint8_t len = 1);
 
 uint8_t curRadio = 0;              // current radio, see radio.h
 bool radioUsed[NUM_RADIO];         // radio found (radio 1 always used, also without cc1101)
+uint8_t radioCsPin[NUM_RADIO] = RADIO_CS_PINS;
+uint8_t radioPinSend[NUM_RADIO] = RADIO_SEND_PINS;
+uint8_t radioPinReceive[NUM_RADIO] = RADIO_RECEIVE_PINS;
+uint8_t radioSpiPin[3] = RADIO_SPI_PINS;
+
+void radioLoadPins() {             // pins from web configuration
+#ifdef RADIO_PIN_CFG
+  if (EEPROM.read(EE_PIN_BASE) != EE_PIN_MARK) return;
+  for (uint8_t i = 0; i < 3; i++) radioSpiPin[i] = EEPROM.read(EE_PIN_BASE + 1 + i);
+  for (uint8_t r = 0; r < NUM_RADIO; r++) {
+    radioCsPin[r] = EEPROM.read(EE_PIN_BASE + 4 + r * 3);
+    radioPinSend[r] = EEPROM.read(EE_PIN_BASE + 5 + r * 3);
+    radioPinReceive[r] = EEPROM.read(EE_PIN_BASE + 6 + r * 3);
+  }
+#endif
+}
 SimpleFIFO<int, FIFO_LENGTH> FiFos[NUM_RADIO]; //store FIFO_LENGTH # ints per radio
 #include "signalDecoder.h"
 #include "commands.h"
@@ -239,8 +255,10 @@ void setup() {
   WiFi.mode(WIFI_STA);
 
   pinMode(PIN_LED, OUTPUT);
+  eeBegin();
+  radioLoadPins();
   for (uint8_t r = 0; r < NUM_RADIO; r++) {
-    pinMode(radioPinReceive[r], INPUT);
+    if (radioPinReceive[r] != RADIO_NO_PIN) pinMode(radioPinReceive[r], INPUT);
   }
 
 #ifdef CMP_CC1101
@@ -249,7 +267,8 @@ void setup() {
 
 for (curRadio = 0; curRadio < NUM_RADIO; curRadio++) {
 #ifdef CMP_CC1101
-  if (curRadio > 0 && !cc1101::checkCC1101()) {    // radio 2-4 only if a cc1101 is connected
+  const bool csSet = radioCsPin[curRadio] != RADIO_NO_PIN;
+  if (curRadio > 0 && (!csSet || radioPinReceive[curRadio] == RADIO_NO_PIN || !cc1101::checkCC1101())) {    // radio 2-4 only if a cc1101 is connected
     continue;
   }
 #endif
@@ -257,8 +276,10 @@ for (curRadio = 0; curRadio < NUM_RADIO; curRadio++) {
   initEEPROM();
 
 #ifdef CMP_CC1101
-  cc1101::CCinit();                                // CC1101 init
-  hasCC1101 = cc1101::checkCC1101();               // Check for cc1101
+  if (csSet) {
+    cc1101::CCinit();                              // CC1101 init
+    hasCC1101 = cc1101::checkCC1101();             // Check for cc1101
+  }
 
   if (hasCC1101 && EEPROM.read(EEADR(EE_CC_OFF)) == 1) {  // module disabled via web config
     cc1101::setIdleMode();

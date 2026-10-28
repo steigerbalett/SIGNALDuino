@@ -36,6 +36,7 @@
 
 extern uint8_t curRadio;
 
+// default pins, on ESP32 they can be changed in the web configuration (stored in EEPROM, EE_PIN_BASE)
 #if NUM_RADIO > 1
   #ifndef RADIO_CS_PINS
     #define RADIO_CS_PINS      {5, 27, 22, 33}
@@ -46,18 +47,31 @@ extern uint8_t curRadio;
   #ifndef RADIO_RECEIVE_PINS
     #define RADIO_RECEIVE_PINS {13, 25, 14, 21}
   #endif
-  static const uint8_t radioCsPin[NUM_RADIO] = RADIO_CS_PINS;
-  static const uint8_t radioPinSend[NUM_RADIO] = RADIO_SEND_PINS;
-  static const uint8_t radioPinReceive[NUM_RADIO] = RADIO_RECEIVE_PINS;
 #else
+  static const uint8_t RADIO_DEF_SEND = PIN_SEND;        // keep values, PIN_SEND / PIN_RECEIVE are redefined below
+  static const uint8_t RADIO_DEF_RECEIVE = PIN_RECEIVE;
   #ifdef SS
-    static const uint8_t radioCsPin[1] = {SS};
+    #define RADIO_CS_PINS      {SS}
   #else
-    static const uint8_t radioCsPin[1] = {RADIO_NO_PIN};
+    #define RADIO_CS_PINS      {RADIO_NO_PIN}
   #endif
-  static const uint8_t radioPinSend[1] = {PIN_SEND};
-  static const uint8_t radioPinReceive[1] = {PIN_RECEIVE};
+  #define RADIO_SEND_PINS      {RADIO_DEF_SEND}
+  #define RADIO_RECEIVE_PINS   {RADIO_DEF_RECEIVE}
 #endif
+#ifndef RADIO_SPI_PINS
+  #define RADIO_SPI_PINS       {SCK, MISO, MOSI}
+#endif
+
+#ifdef ESP32
+  #define RADIO_PIN_CFG                    // pins configurable via web configuration
+  #define EE_PIN_BASE          0x460       // after radio blocks: marker, SCK, MISO, MOSI, NUM_RADIO * (CS, GDO0, GDO2)
+  #define EE_PIN_MARK          0xA7
+#endif
+
+extern uint8_t radioCsPin[NUM_RADIO];
+extern uint8_t radioPinSend[NUM_RADIO];
+extern uint8_t radioPinReceive[NUM_RADIO];
+extern uint8_t radioSpiPin[3];             // SCK, MISO, MOSI
 
 #undef PIN_SEND
 #undef PIN_RECEIVE

@@ -247,10 +247,107 @@ static void webHead(String &p) {
   if (EEPROM.read(EE_WM_THEME)) p.replace(FPSTR(T_c), F("invert"));
 }
 
+// ------------------------------- pins (ESP32) -------------------------------
+#ifdef RADIO_PIN_CFG
+#define PIN_CNT (3 + NUM_RADIO * 3)     // SCK, MISO, MOSI, per radio CS, GDO0, GDO2
+
+static bool pinOut(uint8_t p) {         // ESP32 GPIO usable as output (no flash, no UART0)
+  return p == 0 || p == 2 || p == 4 || p == 5 || (p >= 12 && p <= 19) || (p >= 21 && p <= 23) || (p >= 25 && p <= 27) || p == 32 || p == 33;
+}
+
+static bool pinIn(uint8_t p) {          // GPIO 34-39 input only
+  return pinOut(p) || (p >= 34 && p <= 39);
+}
+
+static void pinName(char *n, uint8_t i) {
+  n[0] = 'p'; n[1] = '0' + i / 10; n[2] = '0' + i % 10; n[3] = 0;
+}
+
+static uint8_t pinCur(uint8_t i) {      // saved value (EEPROM) or active default
+  if (EEPROM.read(EE_PIN_BASE) == EE_PIN_MARK) return EEPROM.read(EE_PIN_BASE + 1 + i);
+  if (i < 3) return radioSpiPin[i];
+  i -= 3;
+  const uint8_t r = i / 3;
+  return i % 3 == 0 ? radioCsPin[r] : i % 3 == 1 ? radioPinSend[r] : radioPinReceive[r];
+}
+
+static bool webSavePins() {
+  uint8_t v[PIN_CNT];
+  uint8_t used[PIN_CNT + 1];
+  uint8_t cnt = 0;
+  char n[4];
+  for (uint8_t i = 0; i < PIN_CNT; i++) {
+    pinName(n, i);
+    String s = WS->arg(n);
+    s.trim();
+    if (s.length() == 0 || s[0] == '-') v[i] = RADIO_NO_PIN;
+    else v[i] = s.toInt() >= 0 && s.toInt() <= 39 ? s.toInt() : 254;   // 254 -> invalid
+  }
+  if (!pinOut(v[0]) || !pinIn(v[1]) || !pinOut(v[2])) return false;    // SCK, MISO, MOSI
+  used[cnt++] = v[0]; used[cnt++] = v[1]; used[cnt++] = v[2];
+  for (uint8_t r = 0; r < NUM_RADIO; r++) {
+    const uint8_t cs = v[3 + r * 3], tx = v[4 + r * 3], rx = v[5 + r * 3];
+    if (cs == RADIO_NO_PIN && r > 0) continue;                         // module not used
+    if (cs != RADIO_NO_PIN) { if (!pinOut(cs)) return false; used[cnt++] = cs; }
+    if (tx != RADIO_NO_PIN) { if (!pinOut(tx)) return false; used[cnt++] = tx; }
+    if (!pinIn(rx)) return false;                                      // GDO2 needed
+    used[cnt++] = rx;
+  }
+  used[cnt++] = PIN_LED;
+  for (uint8_t i = 0; i < cnt; i++)
+    for (uint8_t j = i + 1; j < cnt; j++)
+      if (used[i] == used[j]) return false;                            // pin used twice
+  EEPROM.write(EE_PIN_BASE, EE_PIN_MARK);
+  for (uint8_t i = 0; i < PIN_CNT; i++) EEPROM.write(EE_PIN_BASE + 1 + i, v[i]);
+  EEPROM.commit();
+  return true;
+}
+
+static void webPinInput(String &p, uint8_t i) {
+  char n[4];
+  pinName(n, i);
+  p += F("<input name='"); p += n; p += F("' size='2' value='");
+  uint8_t v = pinCur(i);
+  if (v != RADIO_NO_PIN) p += v;
+  p += F("'>");
+}
+
+static void webPins(String &p) {
+  p += F("<details><summary>Pins (GPIO, wirksam nach Neustart)</summary>SCK ");
+  webPinInput(p, 0);
+  p += F(" MISO ");
+  webPinInput(p, 1);
+  p += F(" MOSI ");
+  webPinInput(p, 2);
+  p += F("<table><tr><td></td><td>CS</td><td>GDO0 (TX)</td><td>GDO2 (RX)</td></tr>");
+  for (uint8_t r = 0; r < NUM_RADIO; r++) {
+    p += F("<tr><td>Modul "); p += r + 1; p += F("</td>");
+    for (uint8_t k = 0; k < 3; k++) {
+      p += F("<td>");
+      webPinInput(p, 3 + r * 3 + k);
+      p += F("</td>");
+    }
+    p += F("</tr>");
+  }
+  p += F("</table><small>Leer = nicht belegt. Modul ohne CS = nicht verwendet, ohne GDO0 = nur Empfang/xFSK. LED-Pin ");
+  p += PIN_LED;
+  p += F(".</small><br><button name='a' value='pd'>Standard-Pins</button></details>");
+}
+#endif
+
 static void handleConfigRadio() {
 
   if (WS->method() == HTTP_POST) {
     String a = WS->arg(F("a"));
+    bool pinErr = false;
+#ifdef RADIO_PIN_CFG
+    if (a == "pd") {                            // default pins
+      EEPROM.write(EE_PIN_BASE, 0);
+      EEPROM.commit();
+    } else if (a != "bl" && a != "fr" && WS->hasArg("p00")) {
+      pinErr = !webSavePins();
+    }
+#endif
 #ifdef CMP_CC1101
     uint8_t b = WS->arg(F("b")).toInt() % EE_BANK_COUNT;
     if (a == "bl") {
@@ -268,7 +365,7 @@ static void handleConfigRadio() {
       if (a == "bs") bankStore(b, WS->arg(F("n")));
 #endif
     }
-    if (a == "rb") {
+    if (a == "rb" && !pinErr) {
       String p;
       webHead(p);
       p += F("<meta http-equiv='refresh' content='15;url=/sd'>Gespeichert, Neustart ...");
@@ -278,7 +375,7 @@ static void handleConfigRadio() {
       ESP.restart();
       return;
     }
-    WS->sendHeader(F("Location"), WS->uri() + F("?m=") + curRadio);   // PRG, avoid resubmit on reload
+    WS->sendHeader(F("Location"), WS->uri() + F("?m=") + curRadio + (pinErr ? F("&e=1") : F("")));   // PRG, avoid resubmit on reload
     WS->send(303);
     return;
   }
@@ -295,7 +392,8 @@ static void handleConfigRadio() {
     p += F("Modul "); p += r + 1; p += F(" (Port "); p += RADIO_PORT_BASE + r; p += ')';
     p += r == curRadio ? F("</b> ") : F("</a> ");
   }
-  p += F("</p><form method='post'><input type='hidden' name='m' value='");
+  p += F("</p><form method='post'><button name='a' value='set' style='position:absolute;left:-9999px' tabindex='-1'></button>"  // default for enter key
+         "<input type='hidden' name='m' value='");
   p += curRadio;
   p += F("'>");
 
@@ -344,6 +442,9 @@ static void handleConfigRadio() {
   p += F("</small></fieldset>");
 #endif
 
+#ifdef RADIO_PIN_CFG
+  if (WS->hasArg("e")) p += F("<p style='color:red'>Ung&uuml;ltige oder doppelte Pins, nicht gespeichert!</p>");
+#endif
   p += F("<fieldset><legend>Decoder</legend>");
   webCheck(p, "ms", F("MS"), musterDec.MSenabled);
   webCheck(p, "mu", F("MU"), musterDec.MUenabled);
@@ -382,6 +483,9 @@ static void handleConfigRadio() {
 
   p += F("<button name='a' value='set'>&Uuml;bernehmen</button> "
          "<button name='a' value='rb'>Speichern &amp; Neustart</button>");
+#ifdef RADIO_PIN_CFG
+  webPins(p);
+#endif
 #ifdef CMP_CC1101
   p += F(" <button name='a' value='fr' onclick=\"return confirm('Werkseinstellungen CC1101?')\">Werkseinstellungen</button>");
 #endif
