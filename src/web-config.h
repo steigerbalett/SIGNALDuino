@@ -18,12 +18,7 @@
 #include "WiFiManager.h"
 
 extern WiFiManager wifiManager;
-extern bool hasCC1101;
-extern bool AfcEnabled;
-#ifdef CMP_CC1101
-  extern bool wmbus;
-  extern bool wmbus_t;
-#endif
+extern bool radioUsed[NUM_RADIO];
 
 #ifndef WEB_TIMEOUT_MS
   #define WEB_TIMEOUT_MS       300000UL  // 5 minutes
@@ -56,12 +51,12 @@ static bool webArg(const char *name) {
 #ifdef CMP_CC1101
 
 static inline uint8_t ccEE(uint8_t reg) {
-  return EEPROM.read(EE_CC1101_CFG + reg);
+  return EEPROM.read(EEADR(EE_CC1101_CFG + reg));
 }
 
 static void ccSet(uint8_t reg, uint8_t val) {   // CC1101 register address, write EEPROM + chip
   if (reg >= EE_CC1101_CFG_SIZE) return;
-  EEPROM.write(EE_CC1101_CFG + reg, val);
+  EEPROM.write(EEADR(EE_CC1101_CFG + reg), val);
   if (hasCC1101) cc1101::writeReg(reg, val);
   if (reg == 0x12) cc1101::ccmode = (val & 0x70) >> 4;
 }
@@ -120,25 +115,25 @@ static String bankName(uint8_t b) {
 static void bankStore(uint8_t b, const String &name) {
   uint16_t a = bankAdr(b);
   EEPROM.write(a, EE_BANK_MARK);
-  for (uint8_t i = 0; i < EE_CC1101_CFG_SIZE; i++) EEPROM.write(a + 1 + i, EEPROM.read(EE_CC1101_CFG + i));
-  for (uint8_t i = 0; i < EE_CC1101_PA_SIZE; i++) EEPROM.write(a + 0x2A + i, EEPROM.read(EE_CC1101_PA + i));
-  EEPROM.write(a + 0x32, EEPROM.read(addr_features));
+  for (uint8_t i = 0; i < EE_CC1101_CFG_SIZE; i++) EEPROM.write(a + 1 + i, EEPROM.read(EEADR(EE_CC1101_CFG + i)));
+  for (uint8_t i = 0; i < EE_CC1101_PA_SIZE; i++) EEPROM.write(a + 0x2A + i, EEPROM.read(EEADR(EE_CC1101_PA + i)));
+  EEPROM.write(a + 0x32, EEPROM.read(EEADR(addr_features)));
   for (uint8_t i = 0; i < EE_BANK_NAMELEN; i++) {
     char c = i < name.length() ? name[i] : 0;
     if (c && !isalnum(c) && c != ' ' && c != '-' && c != '_' && c != '.') c = '_';
     EEPROM.write(a + 0x33 + i, c);
   }
-  EEPROM.write(EE_BANK_ACT, b);
+  EEPROM.write(EEADR(EE_BANK_ACT), b);
   EEPROM.commit();
 }
 
 static void bankLoad(uint8_t b) {
   if (!bankValid(b)) return;
   uint16_t a = bankAdr(b);
-  for (uint8_t i = 0; i < EE_CC1101_CFG_SIZE; i++) EEPROM.write(EE_CC1101_CFG + i, EEPROM.read(a + 1 + i));
-  for (uint8_t i = 0; i < EE_CC1101_PA_SIZE; i++) EEPROM.write(EE_CC1101_PA + i, EEPROM.read(a + 0x2A + i));
-  EEPROM.write(addr_features, EEPROM.read(a + 0x32));
-  EEPROM.write(EE_BANK_ACT, b);
+  for (uint8_t i = 0; i < EE_CC1101_CFG_SIZE; i++) EEPROM.write(EEADR(EE_CC1101_CFG + i), EEPROM.read(a + 1 + i));
+  for (uint8_t i = 0; i < EE_CC1101_PA_SIZE; i++) EEPROM.write(EEADR(EE_CC1101_PA + i), EEPROM.read(a + 0x2A + i));
+  EEPROM.write(EEADR(addr_features), EEPROM.read(a + 0x32));
+  EEPROM.write(EEADR(EE_BANK_ACT), b);
   EEPROM.commit();
   getFunctions(&musterDec.MSenabled, &musterDec.MUenabled, &musterDec.MCenabled, &musterDec.MredEnabled, &AfcEnabled, &wmbus, &wmbus_t);
   if (hasCC1101) {
@@ -212,12 +207,12 @@ static void ccApplyForm() {
   v = WS->arg(F("pa"));                         // patable
   if (v.length()) {
     uint8_t p = strtol(v.c_str(), nullptr, 16);
-    if (p != EEPROM.read(EE_CC1101_PA + 1)) {
-      for (uint8_t i = 0; i < EE_CC1101_PA_SIZE; i++) EEPROM.write(EE_CC1101_PA + i, i == 1 ? p : 0);
+    if (p != EEPROM.read(EEADR(EE_CC1101_PA + 1))) {
+      for (uint8_t i = 0; i < EE_CC1101_PA_SIZE; i++) EEPROM.write(EEADR(EE_CC1101_PA + i), i == 1 ? p : 0);
       if (hasCC1101) cc1101::writePatable();
     }
   }
-  EEPROM.write(EE_CC_OFF, webArg("on") ? 0 : 1);
+  EEPROM.write(EEADR(EE_CC_OFF), webArg("on") ? 0 : 1);
   if (hasCC1101) cc1101::setReceiveMode();
 }
 #endif // CMP_CC1101
@@ -234,7 +229,7 @@ static void webApplyForm() {
   musterDec.MCenabled = webArg("mc");
   musterDec.MredEnabled = webArg("mr");
 #ifdef CMP_CC1101
-  EEPROM.write(EE_BANK_ACT, 0xFF);               // changed config, no longer equal to a bank
+  EEPROM.write(EEADR(EE_BANK_ACT), 0xFF);               // changed config, no longer equal to a bank
   storeFunctions(musterDec.MSenabled, musterDec.MUenabled, musterDec.MCenabled, musterDec.MredEnabled, AfcEnabled, wmbus, wmbus_t);  // incl. commit
 #else
   storeFunctions(musterDec.MSenabled, musterDec.MUenabled, musterDec.MCenabled, musterDec.MredEnabled, AfcEnabled);
@@ -252,8 +247,7 @@ static void webHead(String &p) {
   if (EEPROM.read(EE_WM_THEME)) p.replace(FPSTR(T_c), F("invert"));
 }
 
-void handleConfig() {
-  webKeepOpen = true;                           // page opened -> keep web server until save & reboot
+static void handleConfigRadio() {
 
   if (WS->method() == HTTP_POST) {
     String a = WS->arg(F("a"));
@@ -263,7 +257,7 @@ void handleConfig() {
       bankLoad(b);
     } else if (a == "fr") {
       cc1101::ccFactoryReset();
-      EEPROM.write(EE_BANK_ACT, 0xFF);
+      EEPROM.write(EEADR(EE_BANK_ACT), 0xFF);
       EEPROM.commit();
       if (hasCC1101) cc1101::CCinit();
     } else
@@ -284,7 +278,7 @@ void handleConfig() {
       ESP.restart();
       return;
     }
-    WS->sendHeader(F("Location"), WS->uri());   // PRG, avoid resubmit on reload
+    WS->sendHeader(F("Location"), WS->uri() + F("?m=") + curRadio);   // PRG, avoid resubmit on reload
     WS->send(303);
     return;
   }
@@ -294,13 +288,23 @@ void handleConfig() {
   webHead(p);
   p += F("<h3>SIGNAL-ESP</h3><small>" PROGVERS " | Uptime ");
   p += getUptime();
-  p += F(" s</small><form method='post'>");
+  p += F(" s</small><p>");
+  for (uint8_t r = 0; r < NUM_RADIO; r++) {     // radio selection
+    if (!radioUsed[r]) continue;
+    if (r == curRadio) p += F("<b>"); else { p += F("<a href='?m="); p += r; p += F("'>"); }
+    p += F("Modul "); p += r + 1; p += F(" (Port "); p += RADIO_PORT_BASE + r; p += ')';
+    p += r == curRadio ? F("</b> ") : F("</a> ");
+  }
+  p += F("</p><form method='post'><input type='hidden' name='m' value='");
+  p += curRadio;
+  p += F("'>");
 
 #ifdef CMP_CC1101
   p += F("<fieldset><legend>CC1101 ");
   if (hasCC1101) p += F("(gefunden)"); else p += F("(nicht aktiv)");
+  if (PIN_SEND == RADIO_NO_PIN) p += F(" ohne GDO0: nur Empfang + xFSK-Senden, kein WMBus");
   p += F("</legend><table><tr><td>Modul</td><td>");
-  webCheck(p, "on", F("aktiv (nach Neustart)"), EEPROM.read(EE_CC_OFF) != 1);
+  webCheck(p, "on", F("aktiv (nach Neustart)"), EEPROM.read(EEADR(EE_CC_OFF)) != 1);
   p += F("</td></tr><tr><td>Frequenz MHz</td><td><input name='f' type='number' step='any' min='300' max='928' value='");
   p += String(ccFreq(), 3);
   p += F("'></td></tr><tr><td>bWidth kHz</td><td><select name='bw'>");
@@ -323,7 +327,7 @@ void handleConfig() {
   p += String(ccDev(), 2);
   p += F("'></td></tr><tr><td>Sendeleistung</td><td><select name='pa'>");
   const uint8_t *pt = ccFreq() < 600.0f ? pa433 : pa868;
-  uint8_t pa = EEPROM.read(EE_CC1101_PA + 1);
+  uint8_t pa = EEPROM.read(EEADR(EE_CC1101_PA + 1));
   bool found = false;
   for (uint8_t i = 0; i < sizeof(pa433); i++) {
     uint8_t x = pgm_read_byte(&pt[i]);
@@ -353,7 +357,7 @@ void handleConfig() {
   p += F("</fieldset>");
 
 #ifdef CMP_CC1101
-  uint8_t act = EEPROM.read(EE_BANK_ACT);
+  uint8_t act = EEPROM.read(EEADR(EE_BANK_ACT));
   p += F("<fieldset><legend>B&auml;nke</legend><select name='b'>");
   for (uint8_t i = 0; i < EE_BANK_COUNT; i++) {
     String t = String(i) + F(": ");
@@ -385,6 +389,15 @@ void handleConfig() {
          "<br><small>Der Webserver bleibt bis &bdquo;Speichern &amp; Neustart&ldquo; aktiv.</small>");
   p += FPSTR(HTTP_END);
   WS->send(200, FPSTR(HTTP_HEAD_CT), p);
+}
+
+void handleConfig() {
+  webKeepOpen = true;                           // page opened -> keep web server until save & reboot
+  const uint8_t remRadio = curRadio;
+  uint8_t m = WS->arg(F("m")).toInt();
+  curRadio = (m < NUM_RADIO && radioUsed[m]) ? m : 0;
+  handleConfigRadio();
+  curRadio = remRadio;
 }
 
 // stop web server after WEB_TIMEOUT_MS uptime, if nobody opened the configuration page

@@ -5,14 +5,27 @@
 #endif
 
 #define ccMaxBuf 64                  // for cc1101 FIFO, variable is better to revised
+#ifdef RADIO_CTX
+uint8_t cc1101::ccmodes[NUM_RADIO];  // MDMCFG2–Modem Configuration Bit 6:4, set in CCinit
+uint8_t cc1101::revisions[NUM_RADIO];
+uint8_t ccBufs[NUM_RADIO][ccMaxBuf]; // for cc1101 FIFO, one per radio
+#define ccBuf ccBufs[curRadio]
+int8_t cc1101::freqOffAccs[NUM_RADIO];
+float cc1101::freqErrAvgs[NUM_RADIO];
+#define HAS_PIN_SEND (PIN_SEND != RADIO_NO_PIN)
+#else
 uint8_t cc1101::ccmode = 3;          // MDMCFG2–Modem Configuration Bit 6:4 default ASK/OOK
 uint8_t cc1101::revision = 0x01;
 uint8_t ccBuf[ccMaxBuf];             // for cc1101 FIFO, if Circuit board for more cc110x -> ccBuf expand ( ccBuf[radionr][ccMaxBuf] )
 int8_t cc1101::freqOffAcc = 0;
 float cc1101::freqErrAvg = 0;
+#define HAS_PIN_SEND true
+#endif
 extern volatile bool blinkLED;
 extern void MSG_PRINTtoHEX(uint8_t a);
+#ifndef RADIO_CTX
 extern bool AfcEnabled;
+#endif
 
 const uint8_t cc1101::initVal[] PROGMEM =
 {
@@ -171,7 +184,7 @@ void cc1101::writePatable(void) {
 	wait_Miso();                                    // wait until MISO goes low
 	sendSPI(CC1101_PATABLE | CC1101_WRITE_BURST);   // send register address
 	for (uint8_t i = 0; i < 8; i++) {
-		sendSPI(EEPROM.read(EE_CC1101_PA + i));     // send value
+		sendSPI(EEPROM.read(EEADR(EE_CC1101_PA + i)));     // send value
 	}
 	cc1101_Deselect();
 }
@@ -279,10 +292,10 @@ void cc1101::writeCCreg(uint8_t reg, uint8_t var) { // write CC1101 register
 void cc1101::writeCCpatable(uint8_t var) {          // write 8 byte to patable (kein pa ramping)
 	for (uint8_t i = 0; i < 8; i++) {
 		if (i == 1) {
-			EEPROM.write(EE_CC1101_PA + i, var);
+			EEPROM.write(EEADR(EE_CC1101_PA + i), var);
 		}
 		else {
-			EEPROM.write(EE_CC1101_PA + i, 0);
+			EEPROM.write(EEADR(EE_CC1101_PA + i), 0);
 		}
 	}
 	#if defined(ESP8266) || defined(ESP32)
@@ -332,7 +345,20 @@ void cc1101::setup() {
 	pinAsInput(misoPin);
 #endif
 
+#ifdef RADIO_CTX
+for (uint8_t r = 0; r < NUM_RADIO; r++) {      // all CS high before SPI is used, else more cc1101 answer
+	pinAsOutput(radioCsPin[r]);
+	digitalHigh(radioCsPin[r]);
+	pinAsInput(radioPinReceive[r]);                 // gdo2
+	if (radioPinSend[r] != RADIO_NO_PIN) {
+		pinAsInput(radioPinSend[r]);                  // gdo0, sicherheitshalber bis zum CC1101 init erstmal input
+	}
+	revisions[r] = 0x01;
+	ccmodes[r] = 3;
+}
+#else
 pinAsOutput(csPin);                // set pins for SPI communication
+#endif
 
 #ifdef PIN_MARK433
 	pinAsInputPullUp(PIN_MARK433);
@@ -354,8 +380,10 @@ pinAsOutput(csPin);                // set pins for SPI communication
 	SPI.begin();
 	SPI.setClockDivider(SPI_CLOCK_DIV4);
 #endif
+#ifndef RADIO_CTX
 pinAsInput(PIN_RECEIVE);               // gdo2
 pinAsInput(PIN_SEND);                  // gdo0Pi, sicherheitshalber bis zum CC1101 init erstmal input   
+#endif
 
 #ifndef ARDUINO_MAPLEMINI_F103CB
 	digitalHigh(sckPin);
@@ -424,7 +452,7 @@ void cc1101::setReceiveMode()
 #ifdef CMP_CC1101
   if (maxloop == 0) { DBG_PRINT(FPSTR(TXT_CC1101)); DBG_PRINTLN(F(": Setting RX failed")); }
 #endif
-	pinAsInput(PIN_SEND);
+	if (HAS_PIN_SEND) pinAsInput(PIN_SEND);
 }
 
 void cc1101::setTransmitMode()
@@ -443,7 +471,7 @@ void cc1101::setTransmitMode()
     DBG_PRINT(FPSTR(TXT_CC1101)); DBG_PRINTLN(F(": Setting TX failed"));
     return;
 	}
-	pinAsOutput(PIN_SEND);      // gdo0Pi, sicherheitshalber bis zum CC1101 init erstmal input
+	if (HAS_PIN_SEND) pinAsOutput(PIN_SEND);      // gdo0Pi, sicherheitshalber bis zum CC1101 init erstmal input
   return;
 #endif
 }
@@ -466,7 +494,7 @@ bool cc1101::regCheck()
 	DBG_PRINT(F("_FREQ0=")); DBG_PRINT(readReg(CC1101_FREQ0, CC1101_CONFIG));
 	DBG_PRINT(F(" vs initval FREQ0=")); DBG_PRINT(cc1101::initVal[CC1101_FREQ0]);
 	DBG_PRINT(F(" vs EEPROM FREQ0"));
-	val = EEPROM.read(EE_CC1101_CFG + CC1101_FREQ0);
+	val = EEPROM.read(EEADR(EE_CC1101_CFG + CC1101_FREQ0));
 	sprintf(b, " %d", val);
 	DBG_PRINTLN(b);
 
@@ -474,7 +502,7 @@ bool cc1101::regCheck()
 	DBG_PRINT(F("_FREQ1=")); DBG_PRINT(readReg(CC1101_FREQ1, CC1101_CONFIG));
 	DBG_PRINT(F(" vs initval FREQ1=")); DBG_PRINT(cc1101::initVal[CC1101_FREQ1]);
 	DBG_PRINT(F(" vs EEPROM FREQ1="));
-	val = EEPROM.read(EE_CC1101_CFG + CC1101_FREQ1);
+	val = EEPROM.read(EEADR(EE_CC1101_CFG + CC1101_FREQ1));
 	sprintf(b, " %d", val);
 	DBG_PRINTLN(b);
 
@@ -482,7 +510,7 @@ bool cc1101::regCheck()
 	DBG_PRINT(F("_FREQ2=")); DBG_PRINT(readReg(CC1101_FREQ2, CC1101_CONFIG));
 	DBG_PRINT(F(" vs initval FREQ2=")); DBG_PRINT(cc1101::initVal[CC1101_FREQ2]);
 	DBG_PRINT(F(" vs EEPROM FREQ2=")); 
-	val = EEPROM.read(EE_CC1101_CFG+CC1101_FREQ2);
+	val = EEPROM.read(EEADR(EE_CC1101_CFG+CC1101_FREQ2));
 	sprintf(b, " %d", val);
 	DBG_PRINTLN(b);
 	*/
@@ -496,15 +524,15 @@ bool cc1101::regCheck()
 
 void cc1101::ccFactoryReset() {                            // reset CC1101 and set default values
 	for (uint8_t i = 0; i < sizeof(cc1101::initVal); i++) {
-		EEPROM.write(EE_CC1101_CFG + i, pgm_read_byte(&initVal[i]));
+		EEPROM.write(EEADR(EE_CC1101_CFG + i), pgm_read_byte(&initVal[i]));
 		DBG_PRINT('.');
 	}
 	for (uint8_t i = 0; i < 8; i++) {
 		if (i == 1) {
-			EEPROM.write(EE_CC1101_PA + i, PATABLE_DEFAULT);
+			EEPROM.write(EEADR(EE_CC1101_PA + i), PATABLE_DEFAULT);
 		}
 		else {
-			EEPROM.write(EE_CC1101_PA + i, 0);
+			EEPROM.write(EEADR(EE_CC1101_PA + i), 0);
 		}
 	}
 	#if defined(ESP8266) || defined(ESP32)
@@ -540,14 +568,14 @@ void cc1101::CCinit(void) {                                // initialize CC1101
 
 	sendSPI(0x00 | CC1101_WRITE_BURST);
 	for (uint8_t i = 0; i < sizeof(cc1101::initVal); i++) {         // write EEPROM value to cc1101
-		sendSPI(EEPROM.read(EE_CC1101_CFG + i));
+		sendSPI(EEPROM.read(EEADR(EE_CC1101_CFG + i)));
 		DBG_PRINT('.');
 	}
 
 	cc1101_Deselect();
 	delayMicroseconds(10);                                          // ### todo: welcher Wert ist als delay sinnvoll? ###
 
-	ccmode = ( (EEPROM.read(EE_CC1101_CFG + 18) ) & 0x70 ) >> 4;    // first read modulation direct from 0x12 MDMCFG2
+	ccmode = ( (EEPROM.read(EEADR(EE_CC1101_CFG + 18)) ) & 0x70 ) >> 4;    // first read modulation direct from 0x12 MDMCFG2
 
 	writePatable();                                                 // write PatableArray to patable reg
 	DBG_PRINTLN(F("done"));

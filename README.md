@@ -37,9 +37,25 @@ If you encounter problems compiling for ESP32, sorry the code for this microcont
 
 ESP32/ESP8266 builds serve a small configuration page on the device's IP (`/`, or `/sd` while the WiFi setup AP is active):
 CC1101 module on/off, frequency, bWidth, rAmpl, sens, modulation, data rate, deviation, TX power, raw register writes,
-decoder flags (MS, MU, MC, Mred, AFC, WMBus), 10 banks to store/load complete CC1101 configurations, and firmware update (OTA) via `/update`.
+decoder flags (MS, MU, MC, Mred, AFC, WMBus) for every CC1101 module, 10 banks to store/load complete CC1101 configurations, and firmware update (OTA) via `/update`.
 To save resources the web server is stopped after 5 minutes uptime unless the configuration page was opened;
 once opened it stays active until "Speichern & Neustart".
+
+### ESP32 with up to 4 CC1101
+
+The ESP32 CC1101 build (`esp32cc1101`) supports up to 4 CC1101 modules on the same SPI bus. Every module gets its own telnet port,
+so FHEM uses every module as its own SIGNALduino device (e.g. `192.168.0.10:24`), no changes in FHEM are needed.
+Modules 2-4 are only used if a CC1101 is detected at boot. Pinout (compatible to the SIGNALESP32 board, module 1 = former single CC1101):
+
+| Module | Port | CS | GDO0 (TX) | GDO2 (RX) |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | 23 | 5 | 4 | 13 |
+| 2 | 24 | 27 | 26 | 25 |
+| 3 | 25 | 22 | - | 14 |
+| 4 | 26 | 33 | - | 21 |
+
+SCK 18, MISO 19, MOSI 23 are shared. Modules without GDO0 receive ASK/OOK and xFSK, but can only send xFSK and cannot use WMBus.
+WMBus can be used on one module at a time. Pins can be changed with `RADIO_CS_PINS`, `RADIO_SEND_PINS`, `RADIO_RECEIVE_PINS` and the number of modules with `NUM_RADIO` (build flags, see `src/radio.h`).
 
 ### Signal from my device ist not detected
 

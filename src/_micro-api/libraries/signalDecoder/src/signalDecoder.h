@@ -274,6 +274,7 @@ public:
 
 	bool mc_start_found = false;
 	bool mc_sync = false;
+	uint8_t mc_bit = 0;                // bit state, preserved if message goes over the buffer
 
 	bool isLong(const uint8_t pulse_idx);
 	bool isShort(const uint8_t pulse_idx);
