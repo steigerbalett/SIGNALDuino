@@ -33,6 +33,14 @@ http://www.fhemwiki.de/wiki/SIGNALDuino
 If you encounter problems compiling for ESP32, sorry the code for this microcontroller is currently not finished tested with all variants from ESP32. Contributors are welcome. If you have mane errors from fastDelegate.h try adding this compiler flag:
  -Wno-unused-local-typedef
 
+### ESP web configuration
+
+ESP32/ESP8266 builds serve a small configuration page on the device's IP (`/`, or `/sd` while the WiFi setup AP is active):
+CC1101 module on/off, frequency, bWidth, rAmpl, sens, modulation, data rate, deviation, TX power, raw register writes,
+decoder flags (MS, MU, MC, Mred, AFC, WMBus), 10 banks to store/load complete CC1101 configurations, and firmware update (OTA) via `/update`.
+To save resources the web server is stopped after 5 minutes uptime unless the configuration page was opened;
+once opened it stays active until "Speichern & Neustart".
+
 ### Signal from my device ist not detected
 
 Implemented is a pattern detection engine, that can detect serval signal types. May not all, but most of them.

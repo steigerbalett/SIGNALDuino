@@ -19,6 +19,14 @@
 #define EE_GW                  0x104 // 4 byte for gateway address
 #define EE_SNM                 0x108 // 4 byte for subnet mask
 #define EE_WM_THEME            0x110 // 1 byte for theme dark/light
+#define EE_CC_OFF              0x111 // 1 byte, 1 = cc1101 module disabled (web config)
+#define EE_BANK_ACT            0x112 // 1 byte, active bank, 0xFF = none
+#define EE_BANK_BASE           0x120 // banks for cc1101 configuration (web config)
+#define EE_BANK_SIZE           0x40
+#define EE_BANK_COUNT          10
+#define EE_BANK_MARK           0xB5
+#define EE_BANK_NAMELEN        12
+#define EE_SIZE                (EE_BANK_BASE + EE_BANK_COUNT * EE_BANK_SIZE) // 0x3A0
 #define MAX_SRV_CLIENTS        2
 
 void serialEvent();
@@ -66,6 +74,7 @@ SimpleFIFO<int, FIFO_LENGTH> FiFo; //store FIFO_LENGTH # ints
 #include "WiFiManager.h"           // https://github.com/tzapu/WiFiManager
 WiFiManager wifiManager;
 WiFiManagerParameter custom_field; // global param ( for non blocking w params )
+#include "web-config.h"
 #include "wifi-config.h"
 
 WiFiServer Server(23);             //  port 23 = telnet
@@ -97,6 +106,7 @@ volatile unsigned long lastTime = micros();
 #endif
 
 bool hasCC1101 = false;
+bool ccDisabled = false;
 bool AfcEnabled = true;
 char IB_1[14];                     // Input Buffer one - capture commands
 #ifdef CMP_CC1101
@@ -220,6 +230,13 @@ initEEPROM();
   cc1101::CCinit();                                // CC1101 init
   hasCC1101 = cc1101::checkCC1101();               // Check for cc1101
 
+  if (hasCC1101 && EEPROM.read(EE_CC_OFF) == 1) {  // module disabled via web config
+    cc1101::setIdleMode();
+    cc1101::cmdStrobe(0x39);                       // SPWD, power down
+    hasCC1101 = false;
+    ccDisabled = true;
+  }
+
   if (hasCC1101)
   {
     DBG_PRINT(FPSTR(TXT_CC1101));
@@ -255,7 +272,7 @@ initEEPROM();
   // set custom html menu content, inside menu item custom
   std::vector<const char *> menu = {"wifi", "info", "custom", "param", "sep", "update", "restart"};
   wifiManager.setMenu(menu);
-  const char* menuhtml = "<form action='/custom' method='get'><button>SIGNAL-ESP</button></form><br/>";
+  const char* menuhtml = "<form action='/sd' method='get'><button>SIGNAL-ESP Konfiguration</button></form><br/><form action='/custom' method='get'><button>SIGNAL-ESP Status</button></form><br/>";
   wifiManager.setCustomMenuHTML(menuhtml);
   wifiManager.setWebServerCallback(bindServerCallback);
 
@@ -290,7 +307,9 @@ initEEPROM();
 musterDec.setCallback(writeCallback);
 
 #ifdef CMP_CC1101
-  if (!hasCC1101 || cc1101::regCheck()) {
+  if (ccDisabled) {
+    DBG_PRINTLN(F("cc1101 disabled"));
+  } else if (!hasCC1101 || cc1101::regCheck()) {
 #endif
     enableReceive();
     DBG_PRINTLN(FPSTR(TXT_RECENA));
@@ -316,7 +335,7 @@ MSG_PRINTER.setTimeout(400);
 pinAsOutput(PIN_SEND);
 digitalLow(PIN_LED);
 #ifdef CMP_CC1101
-  if (wmbus == 1) { // WMBus
+  if (wmbus == 1 && hasCC1101) { // WMBus
     mbus_init((uint8_t)wmbus_t + 1); // WMBus mode S or T
   }
 #endif
@@ -326,6 +345,7 @@ digitalLow(PIN_LED);
 
 void loop() {
   wifiManager.process();
+  webConfigLoop();
 
   static int aktVal = 0;
   bool state;

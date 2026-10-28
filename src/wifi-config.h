@@ -119,6 +119,7 @@ void handleFavicon() {
 }
 
 void handleSignal() {
+  webKeepOpen = true;
   String page;
   page.reserve(4096);
   page += FPSTR(HTTP_HEAD_START);
@@ -162,6 +163,10 @@ void handleSignal() {
 
 void bindServerCallback() {
   wifiManager.server->on("/custom", handleSignal);
+  wifiManager.server->on("/sd", handleConfig);
+  if (!wifiManager.getConfigPortalActive()) {           // connected: start page = SIGNAL-ESP config, AP mode: WiFiManager
+    wifiManager.server->on("/", handleConfig);
+  }
   wifiManager.server->on("/favicon.ico", handleFavicon);
 }
 
