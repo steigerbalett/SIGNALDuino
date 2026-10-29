@@ -2,6 +2,7 @@ name: esp32 build
 # builds the ESP32 firmware on every push / pull request and provides the files as artifacts:
 #  - SIGNALDuino_<env>*.bin           -> OTA update via web configuration (/update)
 #  - SIGNALDuino_<env>*_factory.bin   -> first flash via USB at address 0x0 (bootloader + partitions + app)
+# on push / manual start all files are also stored as draft release (one draft per branch, older drafts of the branch are replaced)
 on:
   workflow_dispatch: null
   pull_request:
@@ -90,3 +91,38 @@ jobs:
           name: ${{ steps.compile.outputs.NAME }}
           path: dist/*.bin
           if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download firmware
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l dist
+          SLUG=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9._-]/-/g')
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          PREFIX="esp32-$SLUG-"
+          TAG="$PREFIX$SHA"
+          # replace older drafts of this branch, published releases are kept
+          gh release list --limit 100 --json tagName,isDraft --jq ".[] | select(.isDraft and .tagName[0:${#PREFIX}] == \"$PREFIX\" and (.tagName[${#PREFIX}:] | test(\"^[0-9a-f]{7}$\"))) | .tagName" |
+            while read -r OLD; do gh release delete "$OLD" --yes; done
+          {
+            echo "ESP32 firmware, branch \`${{ github.ref_name }}\`, commit ${{ github.sha }}"
+            echo ""
+            echo "- \`*_factory.bin\`: first flash via USB at address 0x0"
+            echo "- other \`.bin\`: OTA update via web configuration (/update)"
+          } > notes.md
+          gh release create "$TAG" dist/*.bin --draft --target "${{ github.sha }}" \
+            --title "SIGNALDuino ESP32 ${{ github.ref_name }} $SHA" --notes-file notes.md

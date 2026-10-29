@@ -61,6 +61,8 @@ WMBus can be used on one module at a time. All pins (SCK, MISO, MOSI, CS/GDO0/GD
 
 `.github/workflows/esp32.yml` builds `esp32cc1101` and `esp32s` on every push and pull request. The artifacts contain
 `SIGNALDuino_<env>*.bin` for the OTA update (`/update`) and `SIGNALDuino_<env>*_factory.bin` to flash via USB at address 0x0.
+On push and manual start all four files are also stored as draft release (Releases page, one draft per branch, the previous draft of the branch is replaced).
+Publishing the draft creates the tag `esp32-<branch>-<commit>`. Requires "Read and write permissions" for workflows (Settings > Actions > General) if the repository restricts the token.
 
 ### Signal from my device ist not detected
 
