@@ -26,7 +26,7 @@
 #define EE_BANK_COUNT          10
 #define EE_BANK_MARK           0xB5
 #define EE_BANK_NAMELEN        12
-#define EE_SIZE                0x480 // banks end at 0x3A0, then radio 2-4 and pins (radio.h)
+#define EE_SIZE                0x500 // banks end at 0x3A0, then radio 2-4, pins and settings (radio.h)
 #define MAX_SRV_CLIENTS        2
 
 void serialEvent();
@@ -70,6 +70,13 @@ uint8_t radioCsPin[NUM_RADIO] = RADIO_CS_PINS;
 uint8_t radioPinSend[NUM_RADIO] = RADIO_SEND_PINS;
 uint8_t radioPinReceive[NUM_RADIO] = RADIO_RECEIVE_PINS;
 uint8_t radioSpiPin[3] = RADIO_SPI_PINS;
+uint8_t radioLedPin = PIN_LED;     // LED, can be changed in the web configuration (EE_SET_LED)
+#ifdef PIN_LED_INVERSE
+  bool radioLedInv = true;
+#else
+  bool radioLedInv = false;
+#endif
+uint32_t radioMsgCnt[NUM_RADIO];   // received messages per radio (status page)
 
 void radioLoadPins() {             // pins from web configuration
 #ifdef RADIO_PIN_CFG
@@ -168,7 +175,7 @@ void IRAM_ATTR sosBlink (void *pArg) {
   const char* pChar;
   pChar = (const char*)pArg;      //OK in both C and C++
 
-  digitalWrite(PIN_LED, pChar[pos] == '1' ? HIGH : LOW);
+  RADIO_LED(pChar[pos] == '1');
   pos++;
   if (pos == sizeof(pChar) * sizeof(pChar[1]))
     pos = 0;
@@ -199,11 +206,7 @@ void IRAM_ATTR cronjob(__attribute__((unused)) void *pArg) {
       lastTimes[r] = micros();
     }
   }
-#ifdef PIN_LED_INVERSE
-  digitalWrite(PIN_LED, !blinkLED);
-#else
-  digitalWrite(PIN_LED, blinkLED);
-#endif
+  RADIO_LED(blinkLED);
   blinkLED = false;
 
   // Infrequent time uncritical jobs
@@ -226,6 +229,9 @@ void setup() {
   }
   Serial.print(F("Reset reason: "));
   Serial.println(resetReason());
+  eeBegin();
+  settingsInit();                  // web configuration: LED, names, frequency offset, ...
+  if (radioLedPin != RADIO_NO_PIN) pinMode(radioLedPin, OUTPUT);
 
   for (uint8_t r = 0; r < NUM_RADIO; r++) {
     Servers[r] = new WiFiServer(RADIO_PORT_BASE + r);
@@ -286,8 +292,6 @@ void setup() {
   WiFi.disconnect();
   WiFi.mode(WIFI_STA);
 
-  pinMode(PIN_LED, OUTPUT);
-  eeBegin();
   radioLoadPins();
   for (uint8_t r = 0; r < NUM_RADIO; r++) {
     if (radioPinReceive[r] != RADIO_NO_PIN) pinMode(radioPinReceive[r], INPUT);
@@ -306,6 +310,7 @@ for (curRadio = 0; curRadio < NUM_RADIO; curRadio++) {
 #endif
   radioUsed[curRadio] = true;
   initEEPROM();
+  if (EEPROM.read(EE_SET_MCMBL + curRadio)) musterDec.mcMinBitLen = EEPROM.read(EE_SET_MCMBL + curRadio);   // web configuration
 
 #ifdef CMP_CC1101
   if (csSet) {
@@ -338,9 +343,12 @@ curRadio = 0;
   wifiManager.setConfigPortalTimeoutCallback(restart);
   wifiManager.setConnectTimeout(60); // sets timeout for which to attempt connecting, useful if you get a lot of failed connects
   wifiManager.setConnectRetries(3);  // default 1
-  String hostName = F("SIGNAL-");
-  hostName += WiFi.getHostname();
-  hostName.toUpperCase(); // SIGNAL-ESP32-B06CD4, SIGNAL-ESP-DB7D13
+  String hostName = settingStr(EE_SET_HOST, EE_SET_HOSTLEN);   // web configuration
+  if (!hostName.length()) {
+    hostName = F("SIGNAL-");
+    hostName += WiFi.getHostname();
+    hostName.toUpperCase(); // SIGNAL-ESP32-B06CD4, SIGNAL-ESP-DB7D13
+  }
   wifiManager.setHostname(hostName); // set a custom hostname, sets sta and ap dhcp client id for esp32, and sta for esp8266
   wifiManager.setTitle(hostName); // set the webapp title, default WiFiManager
   wifiManager.setRemoveDuplicateAPs(false); // You can also remove or show duplicate networks (default is remove). Use this function to show (or hide) all networks.
@@ -425,7 +433,7 @@ curRadio = 0;
   os_timer_disarm(&blinksos);
 #endif
 
-digitalLow(PIN_LED);
+RADIO_LED(false);
 }
 
 
@@ -447,7 +455,10 @@ void loop() {
     while (FiFo.count()>0) {                // Puffer auslesen und an Dekoder uebergeben
       aktVal = FiFo.dequeue();
       state = musterDec.decode(&aktVal);
-      if (state) blinkLED = true;           // LED blinken, wenn Meldung dekodiert
+      if (state) {                          // LED blinken, wenn Meldung dekodiert
+        blinkLED = true;
+        RADIO_MSG_CNT();
+      }
       if (FiFo.count()<120) yield();
     }
 #ifdef CMP_CC1101

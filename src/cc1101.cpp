@@ -585,6 +585,11 @@ void cc1101::CCinit(void) {                                // initialize CC1101
 	delayMicroseconds(10);                                          // ### todo: welcher Wert ist als delay sinnvoll? ###
 
 	ccmode = ( (EEPROM.read(EEADR(EE_CC1101_CFG + 18)) ) & 0x70 ) >> 4;    // first read modulation direct from 0x12 MDMCFG2
+#ifdef RADIO_CTX
+	freqOffAcc = CC_FOFF_BASE;                                      // frequency offset (crystal correction, web configuration)
+	writeReg(0x0C, freqOffAcc);                                     // 0x0C: FSCTRL0
+	freqErrAvg = 0;
+#endif
 
 	writePatable();                                                 // write PatableArray to patable reg
 	DBG_PRINTLN(F("done"));
@@ -600,7 +605,9 @@ void cc1101::getRxFifo() {           // xFSK
 	uint8_t fifoBytes;
 
 	if (isHigh(PIN_RECEIVE)) {                     // wait for CC1100_FIFOTHR given bytes to arrive in FIFO
-		#ifdef PIN_LED_INVERSE
+		#ifdef RADIO_CTX
+			RADIO_LED(!blinkLED);
+		#elif defined(PIN_LED_INVERSE)
 			digitalWrite(PIN_LED, blinkLED);
 		#else
 			digitalWrite(PIN_LED, !blinkLED);
@@ -620,6 +627,7 @@ void cc1101::getRxFifo() {           // xFSK
 
 		fifoBytes = cc1101::getRXBYTES();          // & 0x7f; // read len, transfer RX fifo
 		if (fifoBytes > 0) {
+			RADIO_MSG_CNT();
 			uint8_t marcstate;
 			uint8_t RSSI = cc1101::getRSSI();
 			int8_t freqErr = cc1101::readReg(0x32, CC1101_READ_BURST); // 0x32 (0xF2): FREQEST – Frequency Offset Estimate from Demodulator

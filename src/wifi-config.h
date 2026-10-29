@@ -158,7 +158,36 @@ void handleSignal() {
   page += F("<dt>WiFi RSSI</dt><dd>");
   page += WiFi.RSSI();
   page += F(" dBm</dd>");
-  page += F("</dl><hr>");
+  page += F("</dl><table><tr><th>Modul</th><th>Port</th><th>Frequenz</th><th>Modus</th><th>Nachr.</th><th>RSSI</th><th>FHEM</th></tr>");
+  const uint8_t remRadio = curRadio;
+  for (curRadio = 0; curRadio < NUM_RADIO; curRadio++) {
+    if (!radioUsed[curRadio]) continue;
+    page += F("<tr><td>"); page += radioName(curRadio);
+    page += F("</td><td>"); page += RADIO_PORT_BASE + curRadio;
+    page += F("</td><td>");
+#ifdef CMP_CC1101
+    if (hasCC1101) {
+      page += String(ccFreq(), 3);
+      page += F("</td><td>");
+      page += wmbus ? (wmbus_t ? F("WMBus T") : F("WMBus S")) : FPSTR(modTxt[cc1101::ccmode & 7]);
+      page += F("</td><td>"); page += radioMsgCnt[curRadio];
+      page += F("</td><td>");
+      const uint8_t raw = cc1101::getRSSI();     // current RSSI (noise floor if nothing is received)
+      page += (raw >= 128 ? ((int)raw - 256) / 2 : raw / 2) - 74;
+      page += F(" dBm");
+    } else {
+      page += ccDisabled ? F("aus</td><td>-") : F("-</td><td>-");
+      page += F("</td><td>"); page += radioMsgCnt[curRadio];
+      page += F("</td><td>-");
+    }
+#else
+    page += F("-</td><td>ASK</td><td>"); page += radioMsgCnt[curRadio]; page += F("</td><td>-");
+#endif
+    page += F("</td><td>"); page += serverClients[curRadio].connected() ? F("verbunden") : F("-");
+    page += F("</td></tr>");
+  }
+  curRadio = remRadio;
+  page += F("</table><small>Nachr. = empfangene Nachrichten seit Neustart, RSSI = aktueller Pegel.</small><hr>");
   page += F("<p/>Github <a href='https://github.com/RFD-FHEM/SIGNALDuino'>https://github.com/RFD-FHEM/SIGNALDuino</a>");
   page += FPSTR(HTTP_END);
   wifiManager.server->send(200, FPSTR(HTTP_HEAD_CT), page);

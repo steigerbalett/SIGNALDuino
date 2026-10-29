@@ -128,6 +128,34 @@ inline uint16_t radioEE(uint16_t a) {
 }
 #define EEADR(a)               radioEE(a)
 
+// global settings of the web configuration, after the pin block (initialized in settingsInit, web-config.h)
+#define EE_SET_BASE            0x480
+#define EE_SET_MARK            0xC3
+#define EE_SET_LED             (EE_SET_BASE + 0x01)  // LED pin, RADIO_NO_PIN = no LED
+#define EE_SET_LEDINV          (EE_SET_BASE + 0x02)  // 1 = LED inverse
+#define EE_SET_WEBTO           (EE_SET_BASE + 0x03)  // web server timeout in minutes, 0 = always on
+#define EE_SET_MCMBL           (EE_SET_BASE + 0x04)  // 4 x MC min bit length, 0 = default
+#define EE_SET_FOFF            (EE_SET_BASE + 0x08)  // 4 x int8 frequency offset (FSCTRL0, 1.587 kHz steps)
+#define EE_SET_NAME            (EE_SET_BASE + 0x0C)  // 4 x module name
+#define EE_SET_NAMELEN         12
+#define EE_SET_USER            (EE_SET_BASE + 0x3C)  // web user
+#define EE_SET_USERLEN         16
+#define EE_SET_PASS            (EE_SET_BASE + 0x4C)  // web password, empty = no authentication
+#define EE_SET_PASSLEN         20
+#define EE_SET_HOST            (EE_SET_BASE + 0x60)  // hostname, empty = SIGNAL-ESP32-xxxxxx
+#define EE_SET_HOSTLEN         32
+#define EE_SET_END             (EE_SET_BASE + 0x80)
+
+#define CC_FOFF_BASE           ((int8_t)EEPROM.read(EE_SET_FOFF + curRadio))   // frequency offset of the current radio
+
+extern uint8_t radioLedPin;
+extern bool radioLedInv;
+extern uint32_t radioMsgCnt[NUM_RADIO];
+#define RADIO_LED(on)          do { if (radioLedPin != RADIO_NO_PIN) digitalWrite(radioLedPin, (bool)(on) != radioLedInv); } while (0)
+#define RADIO_MSG_CNT()        (radioMsgCnt[curRadio]++)
+
 #else
   #define EEADR(a)             (a)
+  #define CC_FOFF_BASE         0
+  #define RADIO_MSG_CNT()
 #endif

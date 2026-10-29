@@ -8,9 +8,11 @@
  *   modulation, PA (TX power), raw register writes
  * - decoder settings: MS, MU, MC, Mred, AFC, WMBus, WMBus_T
  * - EE_BANK_COUNT banks for complete CC1101 configurations (registers + patable + decoder flags)
- * - OTA firmware update via WiFiManager (/update)
- * - the web server is stopped after WEB_TIMEOUT_MS uptime, unless the configuration page was opened.
- *   Once opened, it stays active until "Speichern & Neustart".
+ * - OTA firmware update (/update, /u)
+ * - system: module names, frequency offset, MC min bit length, LED, hostname, web server timeout,
+ *   user / password (ESP32), backup / restore of the configuration (ESP32)
+ * - the web server is stopped after the configured timeout (default WEB_TIMEOUT_MS), unless the configuration
+ *   page was opened. Once opened, it stays active until "Speichern & Neustart".
  */
 
 #if defined (ESP32) || defined(ESP8266)
@@ -21,7 +23,7 @@ extern WiFiManager wifiManager;
 extern bool radioUsed[NUM_RADIO];
 
 #ifndef WEB_TIMEOUT_MS
-  #define WEB_TIMEOUT_MS       300000UL  // 5 minutes
+  #define WEB_TIMEOUT_MS       300000UL  // 5 minutes, default of the setting EE_SET_WEBTO
 #endif
 
 #define WS wifiManager.server
@@ -32,6 +34,51 @@ uint32_t webRestartAt = 0;              // restart requested (millis), done in l
 
 const char WEB_SEL[] PROGMEM = " selected";
 const char WEB_CHK[] PROGMEM = " checked";
+
+// ------------------------------- settings (EE_SET_*, radio.h) -------------------------------
+
+String settingStr(uint16_t adr, uint8_t len) {
+  String s;
+  for (uint8_t i = 0; i < len; i++) {
+    const char c = EEPROM.read(adr + i);
+    if (c == 0 || c == (char)0xFF) break;
+    s += c;
+  }
+  return s;
+}
+
+static void settingWriteStr(uint16_t adr, uint8_t len, const String &s) {
+  for (uint8_t i = 0; i < len; i++) EEPROM.write(adr + i, i < s.length() && i < len - 1 ? s[i] : 0);
+}
+
+void settingsInit() {                   // defaults on first start, load LED
+  if (EEPROM.read(EE_SET_BASE) != EE_SET_MARK) {
+    for (uint16_t a = EE_SET_BASE + 1; a < EE_SET_END; a++) EEPROM.write(a, 0);
+    EEPROM.write(EE_SET_LED, PIN_LED);
+    EEPROM.write(EE_SET_LEDINV, radioLedInv);
+    EEPROM.write(EE_SET_WEBTO, WEB_TIMEOUT_MS / 60000UL);
+    settingWriteStr(EE_SET_USER, EE_SET_USERLEN, F("admin"));
+    EEPROM.write(EE_SET_BASE, EE_SET_MARK);
+    EEPROM.commit();
+  }
+  radioLedPin = EEPROM.read(EE_SET_LED);
+  radioLedInv = EEPROM.read(EE_SET_LEDINV) == 1;
+}
+
+static String radioName(uint8_t r) {
+  String n = settingStr(EE_SET_NAME + r * EE_SET_NAMELEN, EE_SET_NAMELEN);
+  if (!n.length()) { n = F("Modul "); n += r + 1; }
+  return n;
+}
+
+static String webClean(String s, bool host) {   // allowed characters for names / hostname
+  String o;
+  for (uint16_t i = 0; i < s.length(); i++) {
+    const char c = s[i];
+    if (isalnum(c) || c == '-' || (!host && (c == ' ' || c == '_' || c == '.'))) o += c;
+  }
+  return o;
+}
 
 static void webOpt(String &p, const String &val, const String &txt, bool sel) {
   p += F("<option value='"); p += val; p += '\'';
@@ -275,7 +322,41 @@ static void ccApplyForm() {
 }
 #endif // CMP_CC1101
 
+static void webApplySettings() {         // module name, frequency offset, MC min bit length + system settings
+  if (!WS->hasArg("mn")) return;
+  settingWriteStr(EE_SET_NAME + curRadio * EE_SET_NAMELEN, EE_SET_NAMELEN, webClean(WS->arg(F("mn")), false));
+  int16_t mb = WS->arg(F("mb")).toInt();
+  if (mb < 0 || mb > 255) mb = 0;
+  EEPROM.write(EE_SET_MCMBL + curRadio, mb);
+  musterDec.mcMinBitLen = mb ? mb : 17;
+#ifdef CMP_CC1101
+  float fo = WS->arg(F("fo")).toFloat() / (26000.0f / 16384.0f);      // kHz -> FSCTRL0 steps (1.587 kHz)
+  int16_t st = fo < 0 ? (int16_t)(fo - 0.5f) : (int16_t)(fo + 0.5f);
+  if (st < -128) st = -128;
+  if (st > 127) st = 127;
+  if ((int8_t)EEPROM.read(EE_SET_FOFF + curRadio) != st) {
+    EEPROM.write(EE_SET_FOFF + curRadio, (uint8_t)(int8_t)st);
+    cc1101::freqOffAcc = st;
+    cc1101::freqErrAvg = 0;
+    if (hasCC1101) cc1101::writeReg(0x0C, (uint8_t)(int8_t)st);
+  }
+#endif
+  settingWriteStr(EE_SET_HOST, EE_SET_HOSTLEN, webClean(WS->arg(F("hn")), true));
+  int16_t to = WS->arg(F("to")).toInt();
+  EEPROM.write(EE_SET_WEBTO, to < 0 ? 0 : (to > 255 ? 255 : to));
+#ifdef ESP32
+  String u = webClean(WS->arg(F("au")), true);
+  if (u.length()) settingWriteStr(EE_SET_USER, EE_SET_USERLEN, u);
+  if (webArg("ax")) {
+    settingWriteStr(EE_SET_PASS, EE_SET_PASSLEN, String());            // remove password
+  } else if (WS->arg(F("ap")).length()) {
+    settingWriteStr(EE_SET_PASS, EE_SET_PASSLEN, WS->arg(F("ap")));
+  }
+#endif
+}
+
 static void webApplyForm() {
+  webApplySettings();
 #ifdef CMP_CC1101
   ccApplyForm();
   wmbus = webArg("wm");
@@ -331,7 +412,7 @@ static uint8_t pinCur(uint8_t i) {      // saved value (EEPROM) or active defaul
 
 static bool webSavePins() {
   uint8_t v[PIN_CNT];
-  uint8_t used[PIN_CNT + 1];
+  uint8_t used[PIN_CNT + 1];             // pins + LED
   uint8_t cnt = 0;
   char n[4];
   for (uint8_t i = 0; i < PIN_CNT; i++) {
@@ -351,12 +432,20 @@ static bool webSavePins() {
     if (!pinIn(rx)) return false;                                      // GDO2 needed
     used[cnt++] = rx;
   }
-  used[cnt++] = PIN_LED;
+  String l = WS->arg(F("pl"));                                        // LED, empty = no LED
+  l.trim();
+  const uint8_t led = (l.length() == 0 || l[0] == '-') ? RADIO_NO_PIN : (l.toInt() >= 0 && l.toInt() <= 39 ? l.toInt() : 254);
+  if (led != RADIO_NO_PIN) {
+    if (!pinOut(led)) return false;
+    used[cnt++] = led;
+  }
   for (uint8_t i = 0; i < cnt; i++)
     for (uint8_t j = i + 1; j < cnt; j++)
       if (used[i] == used[j]) return false;                            // pin used twice
   EEPROM.write(EE_PIN_BASE, EE_PIN_MARK);
   for (uint8_t i = 0; i < PIN_CNT; i++) EEPROM.write(EE_PIN_BASE + 1 + i, v[i]);
+  EEPROM.write(EE_SET_LED, led);
+  EEPROM.write(EE_SET_LEDINV, webArg("li") ? 1 : 0);
   EEPROM.commit();
   return true;
 }
@@ -387,7 +476,11 @@ static void webPins(String &p) {
     }
     p += F("</tr>");
   }
-  p += F("</table><small>Leer = nicht belegt. Modul ohne CS = nicht verwendet, ohne GDO0 = nur Empfang/xFSK. LED-Pin ");
+  p += F("</table>LED <input name='pl' size='2' value='");
+  if (EEPROM.read(EE_SET_LED) != RADIO_NO_PIN) p += EEPROM.read(EE_SET_LED);
+  p += F("'> ");
+  webCheck(p, "li", F("invertiert"), EEPROM.read(EE_SET_LEDINV) == 1);
+  p += F("<br><small>Leer = nicht belegt (LED leer = keine LED). Modul ohne CS = nicht verwendet, ohne GDO0 = nur Empfang/xFSK. Standard-LED ");
   p += PIN_LED;
   p += F(".</small><br><button name='a' value='pd'>Standard-Pins</button></details>");
 }
@@ -401,6 +494,12 @@ static void handleConfigRadio() {
 #ifdef RADIO_PIN_CFG
     if (a == "pd") {                            // default pins
       EEPROM.write(EE_PIN_BASE, 0);
+      EEPROM.write(EE_SET_LED, PIN_LED);
+#ifdef PIN_LED_INVERSE
+      EEPROM.write(EE_SET_LEDINV, 1);
+#else
+      EEPROM.write(EE_SET_LEDINV, 0);
+#endif
       EEPROM.commit();
     } else if (a != "bl" && a != "fr" && a != "f8" && a != "rm" && WS->hasArg("p00")) {
       pinErr = !webSavePins();
@@ -453,7 +552,7 @@ static void handleConfigRadio() {
   for (uint8_t r = 0; r < NUM_RADIO; r++) {     // radio selection
     if (!radioUsed[r]) continue;
     if (r == curRadio) p += F("<b>"); else { p += F("<a href='?m="); p += r; p += F("'>"); }
-    p += F("Modul "); p += r + 1; p += F(" (Port "); p += RADIO_PORT_BASE + r; p += ')';
+    p += radioName(r); p += F(" (Port "); p += RADIO_PORT_BASE + r; p += ')';
     p += r == curRadio ? F("</b> ") : F("</a> ");
   }
   p += F("</p><form method='post'><button name='a' value='set' style='position:absolute;left:-9999px' tabindex='-1'></button>"  // default for enter key
@@ -467,9 +566,13 @@ static void handleConfigRadio() {
   if (PIN_SEND == RADIO_NO_PIN) p += F(" ohne GDO0: nur Empfang + xFSK-Senden, kein WMBus");
   p += F("</legend><table><tr><td>Modul</td><td>");
   webCheck(p, "on", F("aktiv (nach Neustart)"), EEPROM.read(EEADR(EE_CC_OFF)) != 1);
-  p += F("</td></tr><tr><td>Frequenz MHz</td><td><input name='f' type='number' step='any' min='300' max='928' value='");
+  p += F("</td></tr><tr><td>Name</td><td><input name='mn' maxlength='11' size='12' value='");
+  p += settingStr(EE_SET_NAME + curRadio * EE_SET_NAMELEN, EE_SET_NAMELEN);
+  p += F("'></td></tr><tr><td>Frequenz MHz</td><td><input name='f' type='number' step='any' min='300' max='928' value='");
   p += String(ccFreq(), 3);
-  p += F("'></td></tr><tr><td>bWidth kHz</td><td><select name='bw'>");
+  p += F("'></td></tr><tr><td>Frequenz-Offset kHz</td><td><input name='fo' type='number' step='any' min='-203' max='201' value='");
+  p += String((int8_t)EEPROM.read(EE_SET_FOFF + curRadio) * (26000.0f / 16384.0f), 1);
+  p += F("'> <small>Quarzkorrektur, 1,59-kHz-Schritte</small></td></tr><tr><td>bWidth kHz</td><td><select name='bw'>");
   uint8_t bw = ccEE(0x10) >> 4;
   for (int8_t i = 15; i >= 0; i--) webOpt(p, String(i), String(ccBw(i)), i == bw);
   p += F("</select></td></tr><tr><td>rAmpl dB</td><td><select name='ra'>");
@@ -514,6 +617,14 @@ static void handleConfigRadio() {
   webCheck(p, "mu", F("MU"), musterDec.MUenabled);
   webCheck(p, "mc", F("MC"), musterDec.MCenabled);
   webCheck(p, "mr", F("Mred"), musterDec.MredEnabled);
+#ifndef CMP_CC1101
+  p += F("<input type='hidden' name='mn' value='");      // no cc1101 table: keep name
+  p += settingStr(EE_SET_NAME + curRadio * EE_SET_NAMELEN, EE_SET_NAMELEN);
+  p += F("'>");
+#endif
+  p += F("<br>MC min. Bitl&auml;nge <input name='mb' type='number' min='0' max='255' size='3' value='");
+  if (EEPROM.read(EE_SET_MCMBL + curRadio)) p += EEPROM.read(EE_SET_MCMBL + curRadio);
+  p += F("'> <small>leer = Standard (17)</small>");
 #ifdef CMP_CC1101
   webCheck(p, "afc", F("AFC"), AfcEnabled);
   webCheck(p, "wm", F("WMBus"), wmbus);
@@ -545,6 +656,23 @@ static void handleConfigRadio() {
          "<button name='a' value='bl'>Bank laden</button></fieldset>");
 #endif
 
+  p += F("<fieldset><legend>System (alle Module)</legend><table><tr><td>Hostname</td><td><input name='hn' maxlength='31' size='20' placeholder='SIGNAL-ESP32-...' value='");
+  p += settingStr(EE_SET_HOST, EE_SET_HOSTLEN);
+  p += F("'> <small>nach Neustart</small></td></tr><tr><td>Webserver aus nach</td><td><input name='to' type='number' min='0' max='255' size='3' value='");
+  p += EEPROM.read(EE_SET_WEBTO);
+  p += F("'> min <small>0 = immer an</small></td></tr>");
+#ifdef ESP32
+  p += F("<tr><td>Benutzer</td><td><input name='au' maxlength='15' size='12' value='");
+  p += settingStr(EE_SET_USER, EE_SET_USERLEN);
+  p += F("'></td></tr><tr><td>Passwort</td><td><input name='ap' type='password' maxlength='19' size='12' autocomplete='new-password' placeholder='");
+  p += settingStr(EE_SET_PASS, EE_SET_PASSLEN).length() ? F("unver&auml;ndert") : F("kein Schutz");
+  p += F("'> ");
+  webCheck(p, "ax", F("Passwort l&ouml;schen"), false);
+  p += F("<br><small>Sch&uuml;tzt Konfiguration, Status und OTA-Update (nicht im WLAN-Setup-Modus).</small></td></tr>"
+         "<tr><td>Konfiguration</td><td><a href='/bk'>Backup herunterladen</a></td></tr>");
+#endif
+  p += F("</table></fieldset>");
+
   p += F("<button name='a' value='set'>&Uuml;bernehmen</button> "
          "<button name='a' value='rb'>Speichern &amp; Neustart</button>");
 #ifdef RADIO_PIN_CFG
@@ -564,7 +692,12 @@ static void handleConfigRadio() {
            "In FHEM die passenden MN-Protokolle aktivieren, Attribut rfmode nicht zus&auml;tzlich setzen.</small></fieldset>");
   }
 #endif
-  p += F("</form><hr><a href='/wifi'>WLAN</a> | <a href='/update'>Firmware-Update (OTA)</a> | <a href='/info'>Info</a> | <a href='/custom'>Status</a> | <a href='/param'>Theme</a>"
+  p += F("</form>");
+#ifdef ESP32
+  p += F("<form method='post' action='/rs' enctype='multipart/form-data' onsubmit=\"return confirm('Konfiguration wiederherstellen und neu starten?')\">"
+         "<fieldset><legend>Wiederherstellen</legend><input type='file' name='f' accept='.sdc'> <button>Backup einspielen</button></fieldset></form>");
+#endif
+  p += F("<hr><a href='/wifi'>WLAN</a> | <a href='/update'>Firmware-Update (OTA)</a> | <a href='/info'>Info</a> | <a href='/custom'>Status</a> | <a href='/param'>Theme</a>"
          "<br><small>Der Webserver bleibt bis &bdquo;Speichern &amp; Neustart&ldquo; aktiv.</small>");
   p += FPSTR(HTTP_END);
   WS->send(200, FPSTR(HTTP_HEAD_CT), p);
@@ -636,12 +769,115 @@ static void handleOtaDone() {
   webRestartAt = millis() + 1500;                // also after an error: receiving was stopped
 }
 
+// ------------------------------- backup / restore -------------------------------
+// file: "SDC1", EE_SIZE (2 byte, little endian), EEPROM content
+
+static const char BK_MAGIC[] = "SDC1";
+static uint8_t *rsBuf = nullptr;
+static uint16_t rsLen = 0;
+
+static void handleBackup() {
+  const uint16_t n = 6 + EE_SIZE;
+  uint8_t *b = (uint8_t *)malloc(n);
+  if (!b) { WS->send(500); return; }
+  memcpy(b, BK_MAGIC, 4);
+  b[4] = EE_SIZE & 0xFF;
+  b[5] = EE_SIZE >> 8;
+  for (uint16_t i = 0; i < EE_SIZE; i++) b[6 + i] = EEPROM.read(i);
+  String host = settingStr(EE_SET_HOST, EE_SET_HOSTLEN);
+  if (!host.length()) host = F("signalesp");
+  WS->sendHeader(F("Content-Disposition"), String(F("attachment; filename=")) + host + F(".sdc"));
+  WS->send_P(200, "application/octet-stream", (const char *)b, n);
+  free(b);
+}
+
+static void handleRestoreUpload() {
+  HTTPUpload &upload = WS->upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    free(rsBuf);
+    rsBuf = (uint8_t *)malloc(6 + EE_SIZE);
+    rsLen = 0;
+  } else if (upload.status == UPLOAD_FILE_WRITE && rsBuf) {
+    for (size_t i = 0; i < upload.currentSize && rsLen < 6 + EE_SIZE + 1; i++) {
+      if (rsLen < 6 + EE_SIZE) rsBuf[rsLen] = upload.buf[i];
+      rsLen++;                                   // rsLen > 6 + EE_SIZE -> file too big
+    }
+  }
+}
+
+static void handleRestoreDone() {
+  const bool ok = rsBuf && rsLen == 6 + EE_SIZE && memcmp(rsBuf, BK_MAGIC, 4) == 0 && rsBuf[4] == (EE_SIZE & 0xFF) && rsBuf[5] == (EE_SIZE >> 8);
+  String p;
+  webHead(p);
+  if (ok) {
+    for (uint16_t i = 0; i < EE_SIZE; i++) EEPROM.write(i, rsBuf[6 + i]);
+    EEPROM.commit();
+    p += F("<meta http-equiv='refresh' content='20;url=/'><h3>Konfiguration wiederhergestellt</h3>Neustart ...");
+    webRestartAt = millis() + 1500;
+  } else {
+    p += F("<h3>Ung&uuml;ltige Backup-Datei</h3><a href='/sd'>Zur&uuml;ck</a>");
+  }
+  free(rsBuf);
+  rsBuf = nullptr;
+  p += FPSTR(HTTP_END);
+  WS->send(200, FPSTR(HTTP_HEAD_CT), p);
+}
+
+// ------------------------------- authentication -------------------------------
+// first request handler: if a password is set, every request needs basic auth (not in the WiFi setup portal),
+// afterwards the request is passed to the next matching handler (WiFiManager, configuration, OTA).
+// Signatures for Arduino core 2.x (String) and 3.x (const String &).
+
+static bool webAuthOk() {
+  const String pw = settingStr(EE_SET_PASS, EE_SET_PASSLEN);
+  if (!pw.length() || wifiManager.getConfigPortalActive()) return true;
+  return WS->authenticate(settingStr(EE_SET_USER, EE_SET_USERLEN).c_str(), pw.c_str());
+}
+
+class WebAuthHandler : public RequestHandler {
+  RequestHandler *find(HTTPMethod m, const String &uri) {
+    for (RequestHandler *h = next(); h; h = h->next()) {
+      if (h->canHandle(m, uri)) return h;
+    }
+    return nullptr;
+  }
+  bool doHandle(WebServer &server, HTTPMethod m, const String &uri) {
+    if (!webAuthOk()) {
+      server.requestAuthentication(BASIC_AUTH, "SIGNAL-ESP");
+      return true;
+    }
+    RequestHandler *h = find(m, uri);
+    if (h) return h->handle(server, m, uri);
+    return false;                                 // not found
+  }
+  void doUpload(WebServer &server, const String &uri, HTTPUpload &upload) {
+    if (!webAuthOk()) return;
+    RequestHandler *h = find(HTTP_POST, uri);
+    if (h) h->upload(server, uri, upload);
+  }
+  bool needed() {
+    return settingStr(EE_SET_PASS, EE_SET_PASSLEN).length() && !wifiManager.getConfigPortalActive();
+  }
+public:
+  bool canHandle(HTTPMethod m, String uri) { (void)m; (void)uri; return needed(); }
+  bool canHandle(HTTPMethod m, const String &uri) { (void)m; (void)uri; return needed(); }
+  bool canUpload(String uri) { (void)uri; return needed(); }
+  bool canUpload(const String &uri) { (void)uri; return needed(); }
+  bool handle(WebServer &server, HTTPMethod m, String uri) { return doHandle(server, m, uri); }
+  bool handle(WebServer &server, HTTPMethod m, const String &uri) { return doHandle(server, m, uri); }
+  void upload(WebServer &server, String uri, HTTPUpload &upload) { doUpload(server, uri, upload); }
+  void upload(WebServer &server, const String &uri, HTTPUpload &upload) { doUpload(server, uri, upload); }
+};
+
 void webOtaBind() {
+  WS->addHandler(new WebAuthHandler());         // must be the first handler
   WS->on("/u", HTTP_POST, handleOtaDone, handleOtaUpload);
+  WS->on("/bk", HTTP_GET, handleBackup);
+  WS->on("/rs", HTTP_POST, handleRestoreDone, handleRestoreUpload);
 }
 #endif
 
-// stop web server after WEB_TIMEOUT_MS uptime, if nobody opened the configuration page
+// stop web server after the configured timeout (EE_SET_WEBTO minutes, 0 = never), if nobody opened the configuration page
 inline void webConfigLoop() {
   if (webRestartAt && (int32_t)(millis() - webRestartAt) >= 0) {
     WS->stop();
@@ -649,7 +885,8 @@ inline void webConfigLoop() {
     delay(100);
     ESP.restart();
   }
-  if (webPortalOn && !webKeepOpen && !wifiManager.getConfigPortalActive() && millis() > WEB_TIMEOUT_MS) {
+  const uint8_t to = EEPROM.read(EE_SET_WEBTO);
+  if (webPortalOn && !webKeepOpen && to && !wifiManager.getConfigPortalActive() && millis() > to * 60000UL) {
     wifiManager.stopWebPortal();
     webPortalOn = false;
     DBG_PRINTLN(F("web server stopped"));

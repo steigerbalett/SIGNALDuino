@@ -402,7 +402,10 @@ void mbus_task()
     }
     if (rxStatus == PACKET_OK) // rxStatus == 0
     {
-  		#ifdef PIN_LED_INVERSE
+      RADIO_MSG_CNT();
+		#ifdef RADIO_CTX
+			RADIO_LED(!blinkLED);
+		#elif defined(PIN_LED_INVERSE)
 	  		digitalWrite(PIN_LED, blinkLED);
 		  #else
 			  digitalWrite(PIN_LED, !blinkLED);

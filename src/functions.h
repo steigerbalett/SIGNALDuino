@@ -171,9 +171,9 @@ void disableReceive() {
 #endif
   #ifdef CMP_CC1101
     if (afc == 0) { // reset AFC
-      cc1101::freqOffAcc = 0;
+      cc1101::freqOffAcc = CC_FOFF_BASE;   // 0, on ESP the frequency offset of the web configuration
       cc1101::freqErrAvg = 0;
-      if (hasCC1101) cc1101::writeReg(static_cast<uint8_t>(0x0C), static_cast<uint8_t>(afc) ); // reset 0x0C: FSCTRL0 – Frequency Synthesizer Control
+      if (hasCC1101) cc1101::writeReg(static_cast<uint8_t>(0x0C), static_cast<uint8_t>(cc1101::freqOffAcc) ); // reset 0x0C: FSCTRL0 – Frequency Synthesizer Control
     }
     #if defined (ESP8266) || defined (ESP32)
       if (wmb == 1) { // WMBus

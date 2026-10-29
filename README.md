@@ -43,6 +43,12 @@ The buttons "Standard 433 MHz" / "Standard 868 MHz" load the default register se
 To save resources the web server is stopped after 5 minutes uptime unless the configuration page was opened;
 once opened it stays active until "Speichern & Neustart".
 
+System settings in the web configuration: module names, frequency offset per module (crystal correction via FSCTRL0, 1.59 kHz steps,
+also used as start value for AFC), MC min bit length per module, LED pin (empty = no LED) and inverse, hostname, web server timeout
+(minutes, 0 = always on). ESP32 only: user / password (HTTP basic auth for all pages incl. OTA, not in the WiFi setup portal;
+forgotten password: flash with "Erase Flash"), backup (`/bk`, file `.sdc`) and restore of the complete configuration.
+The status page (`/custom`) shows per module frequency, mode, received messages, current RSSI and whether FHEM is connected.
+
 ### ESP32 with up to 4 CC1101
 
 The ESP32 CC1101 build (`esp32cc1101`) supports up to 4 CC1101 modules on the same SPI bus. Every module gets its own telnet port,
