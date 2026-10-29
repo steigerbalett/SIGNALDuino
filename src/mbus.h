@@ -22,7 +22,9 @@
 // extern String cmdstring; // for send
 // extern uint8_t radionr; // for send nur bei mehreren CC110x
 extern volatile bool blinkLED;
+#ifndef RADIO_CTX
 extern bool AfcEnabled;
+#endif
 extern void MSG_PRINTtoHEX(uint8_t a);
 #ifdef DEBUG
 	extern void DBG_PRINTtoHEX(uint8_t b);

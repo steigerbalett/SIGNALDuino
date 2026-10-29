@@ -1382,7 +1382,7 @@ bool ManchesterpatternDecoder::doDecode() {
 		DBG_PRINTLN("");
 	#endif
 
-	static uint8_t bit = 0; // bit state must be preserved if message goes over the buffer 
+	uint8_t &bit = mc_bit; // bit state must be preserved if message goes over the buffer (per decoder, more radios)
 	#ifdef DEBUGDECODE
 		char value = NULL;
 	#endif

@@ -137,7 +137,11 @@ static const char TXT_WRITE[]           PROGMEM = "write ";
 
 #ifdef ETHERNET_PRINT
   #include <WiFiClient.h>
-  extern WiFiClient serverClient;
+  #ifdef RADIO_CTX
+    extern WiFiClient serverClients[NUM_RADIO];
+  #else
+    extern WiFiClient serverClient;
+  #endif
   #define MSG_PRINTER serverClient
 #else
   #define MSG_PRINTER Serial

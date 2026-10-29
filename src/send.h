@@ -10,8 +10,10 @@
 #endif
 #include "compile_config.h"
 
+#ifndef RADIO_CTX
 extern bool hasCC1101;
 extern char IB_1[14];
+#endif
 
 //================================= RAW Send ======================================
 void send_raw(char *startpos, char *endpos, const int16_t *buckets)
@@ -271,8 +273,12 @@ void send_cmd()
 		}
 	} while (msg_beginptr != NULL);
 
+	bool noSendPin = false;
+#ifdef RADIO_CTX
+	noSendPin = (PIN_SEND == RADIO_NO_PIN && command[0].type != SD_xFSK);   // radio without GDO0, only xFSK possible
+#endif
 #ifdef CMP_CC1101
-	if (hasCC1101) {
+	if (hasCC1101 && !noSendPin) {
 	  cc1101::setTransmitMode();
 	}
 #endif
@@ -286,6 +292,10 @@ void send_cmd()
        repeats 1 --> SM;R=3;P0=500;C=250;D=A4F7FDDE;                                              type MS - ASK/OOK
     */
 		repeats = command[0].repeats;
+	}
+	if (noSendPin) {
+		repeats = 0;
+		MSG_PRINT(F("no send pin "));
 	}
 	for (uint8_t i = 0; i < repeats; i++)
 	{

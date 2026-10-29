@@ -119,6 +119,7 @@ void handleFavicon() {
 }
 
 void handleSignal() {
+  webKeepOpen = true;
   String page;
   page.reserve(4096);
   page += FPSTR(HTTP_HEAD_START);
@@ -151,6 +152,9 @@ void handleSignal() {
   page += String(ESP.getVcc() / 1000.0, 2); // using a float and 2 decimal places
   page += F(" Volt</dd>");
 #endif
+  page += F("<dt>Letzter Neustart</dt><dd>");
+  page += resetReason();
+  page += F("</dd>");
   page += F("<dt>WiFi RSSI</dt><dd>");
   page += WiFi.RSSI();
   page += F(" dBm</dd>");
@@ -161,7 +165,14 @@ void handleSignal() {
 }
 
 void bindServerCallback() {
+#ifdef ESP32
+  webOtaBind();                                          // before WiFiManager registers its own /u
+#endif
   wifiManager.server->on("/custom", handleSignal);
+  wifiManager.server->on("/sd", handleConfig);
+  if (!wifiManager.getConfigPortalActive()) {           // connected: start page = SIGNAL-ESP config, AP mode: WiFiManager
+    wifiManager.server->on("/", handleConfig);
+  }
   wifiManager.server->on("/favicon.ico", handleFavicon);
 }
 
@@ -169,7 +180,11 @@ void configModeCallback(WiFiManager *myWiFiManager) {
   Serial.print(F("Starting AP with SSID: "));
   // if you used auto generated SSID, print it
   Serial.print(myWiFiManager->getConfigPortalSSID());
-  Serial.println(F(" and password: signalesp"));
+  if (strlen(WM_AP_PASSWORD) > 0) {
+    Serial.print(F(" and password: "));
+    Serial.print(F(WM_AP_PASSWORD));
+  }
+  Serial.println();
   Serial.print(F("Please open "));
   Serial.print(WiFi.softAPIP());
   Serial.println(F(" in your browser and configure WiFi."));
@@ -190,7 +205,7 @@ void saveConfigCallback() {
     WiFi.config(ip, gateway, subnet); // reset static ip, gw, sn
     wifiManager.disconnect();
     wifiManager.setSTAStaticIPConfig(ip, gateway, subnet); // wifimanager reset static ip, gw, sn
-    bool res = wifiManager.autoConnect("AutoConnectAP", "password"); // password protected ap
+    bool res = wifiManager.autoConnect("AutoConnectAP", WM_AP_PASSWORD); // same AP password as first start ("" = open)
     if (!res) {
       Serial.println(F("Failed to connect or hit timeout"));
       // ESP.restart();

@@ -1,0 +1,128 @@
+name: esp32 build
+# builds the ESP32 firmware on every push / pull request and provides the files as artifacts:
+#  - SIGNALDuino_<env>*.bin           -> OTA update via web configuration (/update)
+#  - SIGNALDuino_<env>*_factory.bin   -> first flash via USB at address 0x0 (bootloader + partitions + app)
+# on push / manual start all files are also stored as draft release (one draft per branch, older drafts of the branch are replaced)
+on:
+  workflow_dispatch: null
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'platformio.ini'
+      - 'extra_script.py'
+      - '.github/workflows/esp32.yml'
+  push:
+    branches:
+      - '**'
+    paths:
+      - 'src/**'
+      - 'platformio.ini'
+      - 'extra_script.py'
+      - '.github/workflows/esp32.yml'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        envName: [esp32cc1101, esp32s]
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ matrix.envName }}-pio
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.10'
+
+      - name: Install PlatformIO Core and esptool
+        run: pip install --upgrade platformio esptool
+
+      - name: Compile
+        id: compile
+        run: |
+          set -o pipefail
+          pio run -e ${{ matrix.envName }} | tee build.log
+          BUILD=.pio/build/${{ matrix.envName }}
+          APP=$(find $BUILD -maxdepth 1 -name 'SIGNALDuino*.bin' | head -n1)
+          [ -n "$APP" ] || APP=$BUILD/firmware.bin
+          NAME=$(basename "$APP" .bin)
+          echo "APP=$APP" >> $GITHUB_OUTPUT
+          echo "NAME=$NAME" >> $GITHUB_OUTPUT
+          echo "FLASH=$(grep -Po '(?<=^Flash: ).*' build.log | tail -n1)" >> $GITHUB_OUTPUT
+          echo "RAM=$(grep -Po '(?<=^RAM:   ).*' build.log | tail -n1)" >> $GITHUB_OUTPUT
+
+      - name: Create factory image
+        run: |
+          BUILD=.pio/build/${{ matrix.envName }}
+          BOOTAPP0=$(find ~/.platformio/packages/framework-arduinoespressif32 -name boot_app0.bin | head -n1)
+          mkdir -p dist
+          cp "${{ steps.compile.outputs.APP }}" dist/
+          python -m esptool --chip esp32 merge_bin -o dist/${{ steps.compile.outputs.NAME }}_factory.bin \
+            0x1000 $BUILD/bootloader.bin \
+            0x8000 $BUILD/partitions.bin \
+            0xe000 "$BOOTAPP0" \
+            0x10000 "${{ steps.compile.outputs.APP }}"
+          ls -l dist
+
+      - name: Job summary
+        run: |
+          echo "### ${{ matrix.envName }} (${{ github.sha }})" >> $GITHUB_STEP_SUMMARY
+          echo "| Flash | RAM |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| ${{ steps.compile.outputs.FLASH }} | ${{ steps.compile.outputs.RAM }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`${{ steps.compile.outputs.NAME }}.bin\`: OTA update (/update), \`${{ steps.compile.outputs.NAME }}_factory.bin\`: USB flash at 0x0" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.compile.outputs.NAME }}
+          path: dist/*.bin
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download firmware
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l dist
+          SLUG=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9._-]/-/g')
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          PREFIX="esp32-$SLUG-"
+          TAG="$PREFIX$SHA"
+          # replace older drafts of this branch, published releases are kept
+          gh release list --limit 100 --json tagName,isDraft --jq ".[] | select(.isDraft and .tagName[0:${#PREFIX}] == \"$PREFIX\" and (.tagName[${#PREFIX}:] | test(\"^[0-9a-f]{7}$\"))) | .tagName" |
+            while read -r OLD; do gh release delete "$OLD" --yes; done
+          {
+            echo "ESP32 firmware, branch \`${{ github.ref_name }}\`, commit ${{ github.sha }}"
+            echo ""
+            echo "- \`*_factory.bin\`: first flash via USB at address 0x0"
+            echo "- other \`.bin\`: OTA update via web configuration (/update)"
+          } > notes.md
+          gh release create "$TAG" dist/*.bin --draft --target "${{ github.sha }}" \
+            --title "SIGNALDuino ESP32 ${{ github.ref_name }} $SHA" --notes-file notes.md

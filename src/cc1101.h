@@ -14,7 +14,9 @@
 #include "output.h"
 #include "signalDecoder.h"         // xFSK
 
+#ifndef RADIO_CTX
 extern char IB_1[14];
+#endif
 
 #if defined(ESP8266) || defined(ESP32) || defined(ARDUINO_MAPLEMINI_F103CB)
 	#include <SPI.h>
@@ -22,8 +24,10 @@ extern char IB_1[14];
 
 namespace cc1101 {
 
+#ifndef RADIO_CTX
 	extern int8_t freqOffAcc;
 	extern float freqErrAvg;
+#endif
 	
 
 	/*
@@ -44,6 +48,11 @@ namespace cc1101 {
 	#define mosiPin 28                             // MOSI out - SPI2
 	#define misoPin 29                             // MISO in  - SPI2
 	#define sckPin  30                             // SCLK out - SPI2
+#elif defined(RADIO_CTX)
+	#define csPin   radioCsPin[curRadio]   // CSN  out, one per radio
+	#define mosiPin radioSpiPin[2]         // MOSI out
+	#define misoPin radioSpiPin[1]         // MISO in
+	#define sckPin  radioSpiPin[0]         // SCLK out
 #else
 	#define csPin   SS     // CSN  out
 	#define mosiPin MOSI   // MOSI out
@@ -65,8 +74,10 @@ namespace cc1101 {
 	#define CC1101_IOCFG2      0x00  // GDO2 output configuration
 	#define CC1101_PKTCTRL0    0x08  // Packet config register
 
+#ifndef RADIO_CTX
 	extern uint8_t revision;         // xFSK
 	extern uint8_t ccmode;;          // xFSK
+#endif
 	extern const uint8_t initVal[];  // xFSK
 
 	// Status registers - newer version base on 0xF0

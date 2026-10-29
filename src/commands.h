@@ -41,10 +41,11 @@ void DBG_PRINTtoHEX(uint8_t b) {  // this function is the alternative to sprintf
 #include "functions.h"
 #include "signalDecoder.h"
 
+extern volatile bool blinkLED;
+#ifndef RADIO_CTX                // with RADIO_CTX declared in radio.h / functions.h
 extern char IB_1[14];
 extern bool hasCC1101;
 extern SignalDetectorClass musterDec;
-extern volatile bool blinkLED;
 extern uint8_t ccmode;          // xFSK
 #ifdef CMP_CC1101
 	extern bool AfcEnabled;
@@ -52,6 +53,7 @@ extern uint8_t ccmode;          // xFSK
 		extern bool wmbus;
 		extern bool wmbus_t;
 	#endif
+#endif
 #endif
 
 namespace commands {
@@ -324,14 +326,14 @@ namespace commands {
 				if (IB_1[3] == 'n') {
 					MSG_PRINT(F(" :"));
 					for (uint8_t i = 0; i < 16; i++) {
-						const uint8_t val = EEPROM.read(reg + i);
+						const uint8_t val = EEPROM.read(EEADR(reg + i));
 						MSG_PRINT(F(" "));
 						MSG_PRINTtoHEX(val);
 					}
 				}
 				else {
 					MSG_PRINT(F(" = "));
-					const uint8_t val = EEPROM.read(reg);
+					const uint8_t val = EEPROM.read(EEADR(reg));
 					MSG_PRINTtoHEX(val);
 				}
 				MSG_PRINTLN("");
@@ -359,7 +361,7 @@ namespace commands {
 				memcpy(b, &IB_1[3], 2);
 				uint8_t val = strtol(b, nullptr, 16);
 
-				EEPROM.write(reg, val); //Todo pruefen ob reg hier um 1 erhoeht werden muss
+				EEPROM.write(EEADR(reg), val); //Todo pruefen ob reg hier um 1 erhoeht werden muss
 				DBG_PRINT(reg);
 				DBG_PRINT('=');
 
@@ -372,7 +374,7 @@ namespace commands {
 
 				if (reg == 0x10 + 2) {       // 0x10 MDMCFG4 bwidth 325 kHz (EEPROM-Addresse + 2)
 
-					if (EEPROM.read(2) == 13) {     // adr 0x00 is only on OOK/ASK 0D (GD0) | DN022 -- CC110x CC111x OOK ASK Register Settings (Rev. E) "... optimum register settings for OOK/ASK operation."
+					if (EEPROM.read(EEADR(2)) == 13) {     // adr 0x00 is only on OOK/ASK 0D (GD0) | DN022 -- CC110x CC111x OOK ASK Register Settings (Rev. E) "... optimum register settings for OOK/ASK operation."
 						DBG_PRINTLN(F("optimum register settings for OOK/ASK operation"));
 
 						reg = 0x21 + 2;            // 0x21 FREND1 (EEPROM-Addresse + 2)
@@ -383,7 +385,7 @@ namespace commands {
 						} else {
 							val = 0xB6;         // FREND1 = 0xB6
 						}
-						EEPROM.write(reg, val);
+						EEPROM.write(EEADR(reg), val);
 						if (hasCC1101) {
 							cc1101::writeCCreg(reg, val);
 						}
@@ -397,7 +399,7 @@ namespace commands {
 						} else {
 							val = 0x07;           // FIFOTHR = 0x07
 						}
-						EEPROM.write(reg, val);
+						EEPROM.write(EEADR(reg), val);
 						if (hasCC1101) {
 							cc1101::writeCCreg(reg, val);
 						}

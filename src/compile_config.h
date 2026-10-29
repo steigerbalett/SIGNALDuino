@@ -120,4 +120,6 @@
 #endif
 
 
+#include "radio.h"                 // multi radio support (ESP)
+
 #endif  /* END _COMPILE_CONFIG_h */

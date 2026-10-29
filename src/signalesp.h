@@ -19,6 +19,14 @@
 #define EE_GW                  0x104 // 4 byte for gateway address
 #define EE_SNM                 0x108 // 4 byte for subnet mask
 #define EE_WM_THEME            0x110 // 1 byte for theme dark/light
+#define EE_CC_OFF              0x111 // 1 byte, 1 = cc1101 module disabled (web config)
+#define EE_BANK_ACT            0x112 // 1 byte, active bank, 0xFF = none
+#define EE_BANK_BASE           0x120 // banks for cc1101 configuration (web config)
+#define EE_BANK_SIZE           0x40
+#define EE_BANK_COUNT          10
+#define EE_BANK_MARK           0xB5
+#define EE_BANK_NAMELEN        12
+#define EE_SIZE                0x480 // banks end at 0x3A0, then radio 2-4 and pins (radio.h)
 #define MAX_SRV_CLIENTS        2
 
 void serialEvent();
@@ -56,7 +64,25 @@ size_t writeCallback(const uint8_t *buf, uint8_t len = 1);
   #include "mbus.h"
 #endif
 
-SimpleFIFO<int, FIFO_LENGTH> FiFo; //store FIFO_LENGTH # ints
+uint8_t curRadio = 0;              // current radio, see radio.h
+bool radioUsed[NUM_RADIO];         // radio found (radio 1 always used, also without cc1101)
+uint8_t radioCsPin[NUM_RADIO] = RADIO_CS_PINS;
+uint8_t radioPinSend[NUM_RADIO] = RADIO_SEND_PINS;
+uint8_t radioPinReceive[NUM_RADIO] = RADIO_RECEIVE_PINS;
+uint8_t radioSpiPin[3] = RADIO_SPI_PINS;
+
+void radioLoadPins() {             // pins from web configuration
+#ifdef RADIO_PIN_CFG
+  if (EEPROM.read(EE_PIN_BASE) != EE_PIN_MARK) return;
+  for (uint8_t i = 0; i < 3; i++) radioSpiPin[i] = EEPROM.read(EE_PIN_BASE + 1 + i);
+  for (uint8_t r = 0; r < NUM_RADIO; r++) {
+    radioCsPin[r] = EEPROM.read(EE_PIN_BASE + 4 + r * 3);
+    radioPinSend[r] = EEPROM.read(EE_PIN_BASE + 5 + r * 3);
+    radioPinReceive[r] = EEPROM.read(EE_PIN_BASE + 6 + r * 3);
+  }
+#endif
+}
+SimpleFIFO<int, FIFO_LENGTH> FiFos[NUM_RADIO]; //store FIFO_LENGTH # ints per radio
 #include "signalDecoder.h"
 #include "commands.h"
 #include "functions.h"
@@ -66,17 +92,48 @@ SimpleFIFO<int, FIFO_LENGTH> FiFo; //store FIFO_LENGTH # ints
 #include "WiFiManager.h"           // https://github.com/tzapu/WiFiManager
 WiFiManager wifiManager;
 WiFiManagerParameter custom_field; // global param ( for non blocking w params )
+// access point for the first WiFi setup without password (open AP), all cores incl. ESP-IDF 5.x
+// 2025-02-13 - Arduino Release v3.1.2 based on ESP-IDF v5.3: restarts were reported with open AP. The open AP path
+// in the core (AP.cpp: authmode WIFI_AUTH_OPEN) is correct, the reset reason is now shown on serial / status page.
+// A password (min. 8 chars) can be set with build flag -D WM_AP_PASSWORD=\"signalesp\"
+#ifndef WM_AP_PASSWORD
+  #define WM_AP_PASSWORD ""              // open access point
+#endif
+
+#ifdef ESP32
+  #include "esp_system.h"
+#endif
+String resetReason() {                   // reason of the last restart
+#ifdef ESP32
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:   return F("Power on");
+    case ESP_RST_EXT:       return F("External pin");
+    case ESP_RST_SW:        return F("Software (restart)");
+    case ESP_RST_PANIC:     return F("Exception / panic");
+    case ESP_RST_INT_WDT:   return F("Interrupt watchdog");
+    case ESP_RST_TASK_WDT:  return F("Task watchdog");
+    case ESP_RST_WDT:       return F("Other watchdog");
+    case ESP_RST_DEEPSLEEP: return F("Deep sleep");
+    case ESP_RST_BROWNOUT:  return F("Brownout (power supply)");
+    case ESP_RST_SDIO:      return F("SDIO");
+    default:                return F("Unknown");
+  }
+#else
+  return ESP.getResetReason();
+#endif
+}
+#include "web-config.h"
 #include "wifi-config.h"
 
-WiFiServer Server(23);             //  port 23 = telnet
-WiFiClient serverClient;
+WiFiServer *Servers[NUM_RADIO];    //  telnet, port 23 + radio
+WiFiClient serverClients[NUM_RADIO];
 
-SignalDetectorClass musterDec;
+SignalDetectorClass musterDecs[NUM_RADIO];
 
 #define pulseMin  90
 volatile bool blinkLED = false;
 String cmdstring = "";
-volatile unsigned long lastTime = micros();
+volatile unsigned long lastTimes[NUM_RADIO];
 
 /*
 #define digitalLow(P) digitalWrite(P,LOW)
@@ -96,13 +153,12 @@ volatile unsigned long lastTime = micros();
   os_timer_t blinksos;
 #endif
 
-bool hasCC1101 = false;
-bool AfcEnabled = true;
-char IB_1[14];                     // Input Buffer one - capture commands
-#ifdef CMP_CC1101
-  bool wmbus = false;
-  bool wmbus_t = false;
-#endif
+bool hasCC1101s[NUM_RADIO];
+bool ccDisableds[NUM_RADIO];
+bool AfcEnableds[NUM_RADIO];
+char IB_1s[NUM_RADIO][14];         // Input Buffer one - capture commands
+bool wmbuses[NUM_RADIO];
+bool wmbus_ts[NUM_RADIO];
 const char sos_sequence[] = "0101010001110001110001110001010100000000";
 const char boot_sequence[] = "00010100111";
 
@@ -130,15 +186,18 @@ void IRAM_ATTR cronjob(__attribute__((unused)) void *pArg) {
   cli();
   static uint16_t cnt = 0; // approximately every 35 minutes
 
-  const unsigned long  duration = micros() - lastTime;
+  for (uint8_t r = 0; r < NUM_RADIO; r++) {  // curRadio is not valid here (timer task)
+    if (!radioUsed[r]) continue;
+    const unsigned long  duration = micros() - lastTimes[r];
 
-  if (duration > maxPulse) {       // Auf Maximalwert pruefen.
-    int sDuration = maxPulse;
-    if (isLow(PIN_RECEIVE)) {      // Wenn jetzt low ist, ist auch weiterhin low
-      sDuration = -sDuration;
+    if (duration > maxPulse) {       // Auf Maximalwert pruefen.
+      int sDuration = maxPulse;
+      if (isLow(radioPinReceive[r])) {      // Wenn jetzt low ist, ist auch weiterhin low
+        sDuration = -sDuration;
+      }
+      FiFos[r].enqueue(sDuration);
+      lastTimes[r] = micros();
     }
-    FiFo.enqueue(sDuration);
-    lastTime = micros();
   }
 #ifdef PIN_LED_INVERSE
   digitalWrite(PIN_LED, !blinkLED);
@@ -150,8 +209,10 @@ void IRAM_ATTR cronjob(__attribute__((unused)) void *pArg) {
   // Infrequent time uncritical jobs
   if (cnt == 0 || cnt == 32768) { // approximately every 17,5 minutes
     getUptime();
-    musterDec.reset();
-    FiFo.flush();
+    for (uint8_t r = 0; r < NUM_RADIO; r++) {
+      musterDecs[r].reset();
+      FiFos[r].flush();
+    }
   }
   cnt++;
   sei();
@@ -163,28 +224,46 @@ void setup() {
   while (!Serial) {
     delay(90); // wait for serial port to connect. Needed for native USB
   }
+  Serial.print(F("Reset reason: "));
+  Serial.println(resetReason());
+
+  for (uint8_t r = 0; r < NUM_RADIO; r++) {
+    Servers[r] = new WiFiServer(RADIO_PORT_BASE + r);
+    lastTimes[r] = micros();
+    AfcEnableds[r] = true;
+  }
   
 #if defined(ESP8266)
   gotIpEventHandler = WiFi.onStationModeGotIP([](__attribute__((unused)) const WiFiEventStationModeGotIP& event)
   {
-    Server.begin();  // start telnet server
-    Server.setNoDelay(true); // With nodelay set to true, this function will to disable Nagle algorithm (https://en.wikipedia.org/wiki/Nagle%27s_algorithm).
+    for (uint8_t r = 0; r < NUM_RADIO; r++) {
+      if (!radioUsed[r]) continue;
+      Servers[r]->begin();  // start telnet server
+      Servers[r]->setNoDelay(true); // With nodelay set to true, this function will to disable Nagle algorithm (https://en.wikipedia.org/wiki/Nagle%27s_algorithm).
+    }
   });
 
   disconnectedEventHandler = WiFi.onStationModeDisconnected([](const WiFiEventStationModeDisconnected & event)
   {
-    Server.stop();
+    for (uint8_t r = 0; r < NUM_RADIO; r++) {
+      if (radioUsed[r]) Servers[r]->stop();
+    }
     Serial.print(F("WiFi lost connection. Reason: "));
     Serial.println(event.reason);
   });
 #elif defined(ESP32)
   WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
-    Server.begin();  // start telnet server
-    Server.setNoDelay(true);
+    for (uint8_t r = 0; r < NUM_RADIO; r++) {
+      if (!radioUsed[r]) continue;
+      Servers[r]->begin();  // start telnet server
+      Servers[r]->setNoDelay(true);
+    }
   }, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_CONNECTED);
 
   WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
-    Server.stop();  // end telnet server
+    for (uint8_t r = 0; r < NUM_RADIO; r++) {
+      if (radioUsed[r]) Servers[r]->stop();  // end telnet server
+    }
     Serial.print("WiFi lost connection. Reason: ");
     Serial.println(info.wps_fail_reason);
     
@@ -207,27 +286,51 @@ void setup() {
   WiFi.disconnect();
   WiFi.mode(WIFI_STA);
 
-  pinMode(PIN_RECEIVE, INPUT);
   pinMode(PIN_LED, OUTPUT);
+  eeBegin();
+  radioLoadPins();
+  for (uint8_t r = 0; r < NUM_RADIO; r++) {
+    if (radioPinReceive[r] != RADIO_NO_PIN) pinMode(radioPinReceive[r], INPUT);
+  }
 
 #ifdef CMP_CC1101
-  cc1101::setup(); // set pins for input/output, init SPI
+  cc1101::setup(); // set pins for input/output, init SPI (all radios)
 #endif
 
-initEEPROM();
+for (curRadio = 0; curRadio < NUM_RADIO; curRadio++) {
+#ifdef CMP_CC1101
+  const bool csSet = radioCsPin[curRadio] != RADIO_NO_PIN;
+  if (curRadio > 0 && (!csSet || radioPinReceive[curRadio] == RADIO_NO_PIN || !cc1101::checkCC1101())) {    // radio 2-4 only if a cc1101 is connected
+    continue;
+  }
+#endif
+  radioUsed[curRadio] = true;
+  initEEPROM();
 
 #ifdef CMP_CC1101
-  cc1101::CCinit();                                // CC1101 init
-  hasCC1101 = cc1101::checkCC1101();               // Check for cc1101
+  if (csSet) {
+    cc1101::CCinit();                              // CC1101 init
+    hasCC1101 = cc1101::checkCC1101();             // Check for cc1101
+  }
+
+  if (hasCC1101 && EEPROM.read(EEADR(EE_CC_OFF)) == 1) {  // module disabled via web config
+    cc1101::setIdleMode();
+    cc1101::cmdStrobe(0x39);                       // SPWD, power down
+    hasCC1101 = false;
+    ccDisabled = true;
+  }
 
   if (hasCC1101)
   {
     DBG_PRINT(FPSTR(TXT_CC1101));
+    DBG_PRINT(curRadio + 1);
+    DBG_PRINT(' ');
     DBG_PRINTLN(FPSTR(TXT_FOUND));
     musterDec.setCallback(&cc1101::getRSSI);   // Provide the RSSI Callback
   }
-
 #endif 
+}
+curRadio = 0;
 
 
   wifiManager.setAPCallback(configModeCallback);
@@ -255,7 +358,7 @@ initEEPROM();
   // set custom html menu content, inside menu item custom
   std::vector<const char *> menu = {"wifi", "info", "custom", "param", "sep", "update", "restart"};
   wifiManager.setMenu(menu);
-  const char* menuhtml = "<form action='/custom' method='get'><button>SIGNAL-ESP</button></form><br/>";
+  const char* menuhtml = "<form action='/sd' method='get'><button>SIGNAL-ESP Konfiguration</button></form><br/><form action='/custom' method='get'><button>SIGNAL-ESP Status</button></form><br/>";
   wifiManager.setCustomMenuHTML(menuhtml);
   wifiManager.setWebServerCallback(bindServerCallback);
 
@@ -269,10 +372,7 @@ initEEPROM();
   wifiManager.addParameter(&custom_field);
   wifiManager.setSaveParamsCallback(saveParamCallback);
 
-  wifiManager.autoConnect(hostName.c_str(),"signalesp"); // hostname, password
-  // wm:AccessPoint set password is INVALID or <8 chars
-  // 2025-02-13 - Arduino Release v3.1.2 based on ESP-IDF v5.3 (seit dem AP nicht mehr ohne Passwort, ohne PW Neustart)
-  // wifiManager.autoConnect(hostName.c_str()); // if you just want an unsecured access point
+  wifiManager.autoConnect(hostName.c_str(), WM_AP_PASSWORD); // hostname, password ("" = open AP, else min. 8 chars)
 
   wifiManager.setConfigPortalBlocking(false);
   wifiManager.startWebPortal();
@@ -287,10 +387,14 @@ initEEPROM();
   os_timer_setfn(&cronTimer, &cronjob, NULL);
 #endif
 
+for (curRadio = 0; curRadio < NUM_RADIO; curRadio++) {
+if (!radioUsed[curRadio]) continue;
 musterDec.setCallback(writeCallback);
 
 #ifdef CMP_CC1101
-  if (!hasCC1101 || cc1101::regCheck()) {
+  if (ccDisabled) {
+    DBG_PRINTLN(F("cc1101 disabled"));
+  } else if (!hasCC1101 || cc1101::regCheck()) {
 #endif
     enableReceive();
     DBG_PRINTLN(FPSTR(TXT_RECENA));
@@ -304,6 +408,14 @@ musterDec.setCallback(writeCallback);
 #endif
 
 MSG_PRINTER.setTimeout(400);
+if (PIN_SEND != RADIO_NO_PIN) pinAsOutput(PIN_SEND);
+#ifdef CMP_CC1101
+  if (wmbus == 1 && hasCC1101) { // WMBus
+    mbus_init((uint8_t)wmbus_t + 1); // WMBus mode S or T
+  }
+#endif
+}
+curRadio = 0;
 
 #ifdef ESP32
   esp_timer_start_periodic(cronTimer_handle, 32001);
@@ -313,22 +425,19 @@ MSG_PRINTER.setTimeout(400);
   os_timer_disarm(&blinksos);
 #endif
 
-pinAsOutput(PIN_SEND);
 digitalLow(PIN_LED);
-#ifdef CMP_CC1101
-  if (wmbus == 1) { // WMBus
-    mbus_init((uint8_t)wmbus_t + 1); // WMBus mode S or T
-  }
-#endif
 }
 
 
 
 void loop() {
   wifiManager.process();
+  webConfigLoop();
 
   static int aktVal = 0;
   bool state;
+  for (curRadio = 0; curRadio < NUM_RADIO; curRadio++) {
+  if (!radioUsed[curRadio]) continue;
   serialEvent();
   ethernetEvent();
 
@@ -350,6 +459,8 @@ void loop() {
     }
   }
 #endif
+  }
+  curRadio = 0;
 #ifdef ESP8266
   yield();
 #endif
@@ -363,8 +474,10 @@ void loop() {
 
 #ifdef _USE_WRITE_BUFFER
   const size_t writeBufferSize = 512;
-  size_t writeBufferCurrent = 0;
-  uint8_t writeBuffer[writeBufferSize];
+  size_t writeBufferCurrents[NUM_RADIO];
+  uint8_t writeBuffers[NUM_RADIO][writeBufferSize];
+  #define writeBufferCurrent writeBufferCurrents[curRadio]
+  #define writeBuffer writeBuffers[curRadio]
 #endif
 
 
@@ -428,6 +541,7 @@ size_t writeCallback(const uint8_t *buf, uint8_t len)
 inline void ethernetEvent()
 {
   //check if there are any new clients
+  WiFiServer &Server = *Servers[curRadio];
   if (Server.hasClient()) {
     if (!serverClient || !serverClient.connected()) {
       if (serverClient) serverClient.stop();
@@ -458,7 +572,8 @@ inline void ethernetEvent()
 //================================= Serielle verarbeitung ======================================
 void serialEvent()
 {
-  static uint8_t idx = 0;
+  static uint8_t idxs[NUM_RADIO];  // per radio
+  uint8_t &idx = idxs[curRadio];
   while (MSG_PRINTER.connected() > 0 && MSG_PRINTER.available())
   {
     if (idx == 14) {
