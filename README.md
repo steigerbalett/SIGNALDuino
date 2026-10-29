@@ -77,9 +77,27 @@ Publishing the draft creates the tag `esp32-<branch>-<commit>`. Requires "Read a
 `esp32s` and `esp32cc1101` use Arduino core 3.x (ESP-IDF 5) from [pioarduino](https://github.com/pioarduino/platform-espressif32), the official PlatformIO platform only provides core 2.x.
 `esp32cc1101_core2` (core 2.0.14, ESP-IDF 4.4) is kept as fallback. The core 3 builds use the partition table `min_spiffs.csv` (2 x 1.9 MB app instead of 2 x 1.25 MB).
 
-* Update from a core 2 firmware via OTA works as long as the firmware is smaller than 1.25 MB (currently about 1.1 MB), the configuration is kept.
-* The larger partitions are only used after flashing the `_factory.bin` via USB. This also erases the configuration (EEPROM in NVS) and WiFi settings, so make a backup (`/bk`) first and restore it afterwards.
+* **Changing from a core 2 firmware to this version requires flashing the `_factory.bin` via USB** (new partition scheme), an OTA update is not sufficient.
+  This erases the configuration (EEPROM in NVS) and WiFi settings, so make a backup (`/bk`) first and restore it afterwards. Later updates via OTA (`/update`).
 * Local build: PlatformIO Core 6.1 or newer, in VS Code the PlatformIO or pioarduino IDE extension.
+
+#### Flash the factory image with a web installer
+
+The `_factory.bin` contains bootloader, partition table and firmware and is flashed at address **0x0**. No software installation is needed,
+a browser with Web Serial support (Chrome, Edge, Opera on desktop) is enough:
+
+* **Espressif esptool-js** (official): https://espressif.github.io/esptool-js/
+  1. Connect the ESP32 via USB.
+  2. Press the **BOOT** button and keep it pressed until the serial port has been selected in the browser.
+  3. Click *Connect*, select the serial port, release BOOT after the connection is established.
+  4. Set *Flash Address* to `0x0`, choose the `_factory.bin`, click *Program*.
+
+  Optional *Erase Flash* before programming deletes the stored WiFi and CC1101 configuration.
+* **ESPHome Web**: https://web.esphome.io/ , hold **BOOT** as above, *Connect*, select the port, *Install*, select the `_factory.bin` (written at 0x0).
+
+If the port does not appear, install the USB driver (CP210x or CH340). If the connection fails with "Invalid head of packet" or `downloadMode:false`,
+the ESP32 is not in download mode: hold BOOT, press EN/RST briefly, release BOOT and connect again.
+After flashing, connect to the open WiFi access point of the SIGNALDuino to configure WiFi (or restore the backup). Later updates use the OTA `.bin` via `/update`.
 
 ### Signal from my device ist not detected
 
