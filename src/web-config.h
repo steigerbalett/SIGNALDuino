@@ -242,7 +242,7 @@ static void webHead(String &p) {
   p += FPSTR(HTTP_HEAD_START);
   p.replace(FPSTR(T_v), F("SIGNAL-ESP"));
   p += FPSTR(HTTP_STYLE);
-  p += F("<style>.wrap{max-width:560px}select,input{width:auto;padding:4px}fieldset{margin:8px 0}td{padding:2px 6px}</style>");
+  p += F("<style>.wrap{max-width:560px}select,input{width:auto;padding:4px}fieldset{margin:8px 0}td{padding:2px 6px}button{margin:4px 0}</style>");
   p += FPSTR(HTTP_HEAD_END);
   if (EEPROM.read(EE_WM_THEME)) p.replace(FPSTR(T_c), F("invert"));
 }
