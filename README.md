@@ -38,6 +38,7 @@ If you encounter problems compiling for ESP32, sorry the code for this microcont
 ESP32/ESP8266 builds serve a small configuration page on the device's IP (`/`, or `/sd` while the WiFi setup AP is active):
 CC1101 module on/off, frequency, bWidth, rAmpl, sens, modulation, data rate, deviation, TX power, raw register writes,
 decoder flags (MS, MU, MC, Mred, AFC, WMBus) for every CC1101 module, 10 banks to store/load complete CC1101 configurations, and firmware update (OTA) via `/update`.
+The buttons "Standard 433 MHz" / "Standard 868 MHz" load the default register set (same as FHEM rfmode `SlowRF_ccFactoryReset`, ASK/OOK, bWidth 325 kHz, rAmpl 42 dB, sens 8 dB) with 433.920 MHz or 868.350 MHz and TX power 5 dBm.
 To save resources the web server is stopped after 5 minutes uptime unless the configuration page was opened;
 once opened it stays active until "Speichern & Neustart".
 

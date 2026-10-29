@@ -344,7 +344,7 @@ static void handleConfigRadio() {
     if (a == "pd") {                            // default pins
       EEPROM.write(EE_PIN_BASE, 0);
       EEPROM.commit();
-    } else if (a != "bl" && a != "fr" && WS->hasArg("p00")) {
+    } else if (a != "bl" && a != "fr" && a != "f8" && WS->hasArg("p00")) {
       pinErr = !webSavePins();
     }
 #endif
@@ -352,8 +352,13 @@ static void handleConfigRadio() {
     uint8_t b = WS->arg(F("b")).toInt() % EE_BANK_COUNT;
     if (a == "bl") {
       bankLoad(b);
-    } else if (a == "fr") {
+    } else if (a == "fr" || a == "f8") {      // defaults 433.92 / 868.35 MHz (SlowRF, FHEM rfmode SlowRF_ccFactoryReset)
       cc1101::ccFactoryReset();
+      if (a == "f8") {
+        static const uint8_t freq868[] = {0x21, 0x65, 0xE8};   // 868.350 MHz (FREQ2..0)
+        for (uint8_t i = 0; i < 3; i++) EEPROM.write(EEADR(EE_CC1101_CFG + CC1101_FREQ2 + i), freq868[i]);
+        EEPROM.write(EEADR(EE_CC1101_PA + 1), 0x81);          // 5 dBm for 868 MHz
+      }
       EEPROM.write(EEADR(EE_BANK_ACT), 0xFF);
       EEPROM.commit();
       if (hasCC1101) cc1101::CCinit();
@@ -487,7 +492,8 @@ static void handleConfigRadio() {
   webPins(p);
 #endif
 #ifdef CMP_CC1101
-  p += F(" <button name='a' value='fr' onclick=\"return confirm('Werkseinstellungen CC1101?')\">Werkseinstellungen</button>");
+  p += F(" <button name='a' value='fr' onclick=\"return confirm('Standardwerte 433 MHz laden?')\">Standard 433 MHz</button>"
+         " <button name='a' value='f8' onclick=\"return confirm('Standardwerte 868 MHz laden?')\">Standard 868 MHz</button>");
 #endif
   p += F("</form><hr><a href='/wifi'>WLAN</a> | <a href='/update'>Firmware-Update (OTA)</a> | <a href='/info'>Info</a> | <a href='/custom'>Status</a> | <a href='/param'>Theme</a>"
          "<br><small>Der Webserver bleibt bis &bdquo;Speichern &amp; Neustart&ldquo; aktiv.</small>");
