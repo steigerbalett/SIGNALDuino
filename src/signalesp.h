@@ -271,7 +271,7 @@ void setup() {
       if (radioUsed[r]) Servers[r]->stop();  // end telnet server
     }
     Serial.print("WiFi lost connection. Reason: ");
-    Serial.println(info.wps_fail_reason);
+    Serial.println(info.wifi_sta_disconnected.reason);
     
   }, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
 #endif
@@ -346,7 +346,15 @@ curRadio = 0;
   String hostName = settingStr(EE_SET_HOST, EE_SET_HOSTLEN);   // web configuration
   if (!hostName.length()) {
     hostName = F("SIGNAL-");
-    hostName += WiFi.getHostname();
+    const char *h = WiFi.getHostname();
+    if (h && *h) {
+      hostName += h;
+    } else {                       // core 3.x: hostname can be empty before WiFi is started
+      String mac = WiFi.macAddress();   // AA:BB:CC:DD:EE:FF -> ESP-DDEEFF
+      mac.replace(":", "");
+      hostName += F("ESP-");
+      hostName += mac.substring(6);
+    }
     hostName.toUpperCase(); // SIGNAL-ESP32-B06CD4, SIGNAL-ESP-DB7D13
   }
   wifiManager.setHostname(hostName); // set a custom hostname, sets sta and ap dhcp client id for esp32, and sta for esp8266

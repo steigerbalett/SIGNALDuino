@@ -50,16 +50,6 @@ jobs:
           - envName: esp32cc1101
           - envName: esp8266s
           - envName: esp8266cc1101
-          - envName: MAPLEMINI_F103CBs
-          - envName: MAPLEMINI_F103CBcc1101
-          - envName: nano328
-          - envName: nanoCC1101
-          - envName: miniculCC1101
-          - envName: promini8cc1101
-          - envName: promini16cc1101
-          - envName: promini8s
-          - envName: promini16s
-          - envName: radinoCC1101
           - envName: wemos_d1_mini_proCC1101
 
     runs-on: ubuntu-latest
@@ -84,7 +74,7 @@ jobs:
     
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.10'
+          python-version: '3.12'
       - name: Install PlatformIO Core
         run: pip install --upgrade platformio
 
@@ -96,8 +86,8 @@ jobs:
         run: |
           export COMPILE_OUTPUT=$(pio run -e ${{ matrix.envName }} )
           echo "$COMPILE_OUTPUT"
-          FILEEXT=$(find .pio/build/${{ matrix.envName }} -maxdepth 1 \( -name 'SIGNALDuino*.bin' -o -name 'SIGNALDuino*.hex' \) | while read file; do echo "${file##*.}"; done)
-          FILENAME=$(find .pio/build/${{ matrix.envName }}/ -maxdepth 1 \( -name 'SIGNALDuino*.bin' -o -name 'SIGNALDuino*.hex' \) -printf "%f" )
+          FILEEXT=$(find .pio/build/${{ matrix.envName }} -maxdepth 1 \( -name 'SIGNALDuino*.bin' -o -name 'SIGNALDuino*.hex' \) ! -name '*factory.bin' | while read file; do echo "${file##*.}"; done)
+          FILENAME=$(find .pio/build/${{ matrix.envName }}/ -maxdepth 1 \( -name 'SIGNALDuino*.bin' -o -name 'SIGNALDuino*.hex' \) ! -name '*factory.bin' -printf "%f" )
           echo "Extension: $FILEEXT"
           echo "FILENAME=$(echo $FILENAME | tr -d '\n')" >> $GITHUB_OUTPUT
           echo "FILEEXT=$(echo $FILEEXT | tr -d '\n')" >> $GITHUB_OUTPUT

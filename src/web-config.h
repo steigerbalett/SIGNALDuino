@@ -835,6 +835,8 @@ static bool webAuthOk() {
 }
 
 class WebAuthHandler : public RequestHandler {
+  using RequestHandler::canHandle;              // keep the other overloads of the core visible
+  using RequestHandler::canUpload;
   RequestHandler *find(HTTPMethod m, const String &uri) {
     for (RequestHandler *h = next(); h; h = h->next()) {
       if (h->canHandle(m, uri)) return h;

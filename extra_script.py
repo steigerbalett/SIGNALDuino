@@ -61,7 +61,7 @@ basetag = git_basetag()
 refslug = os.environ.get('GITHUB_REF_SLUG') or re.sub(r'[^a-zA-Z0-9._-]', '-', os.environ.get('GITHUB_REF_NAME', ''))
 
 if (reftype == 'branch') :
-    build_version = basetag+refslug+"+"+date
+    build_version = basetag+("-"+refslug if refslug else "")+"+"+date
 elif (reftype == 'tag') :
     build_version = refslug or (basetag+"+"+date)
 else:

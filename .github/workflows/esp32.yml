@@ -1,7 +1,8 @@
 name: esp32 build
-# builds the ESP32 firmware on every push / pull request and provides the files as artifacts:
-#  - SIGNALDuino_<env>*.bin           -> OTA update via web configuration (/update)
-#  - SIGNALDuino_<env>*_factory.bin   -> first flash via USB at address 0x0 (bootloader + partitions + app)
+# builds the ESP32 / ESP8266 firmware on every push / pull request and provides the files as artifacts:
+#  - SIGNALDuino_<env>*.bin           -> OTA update via web configuration (/update), ESP8266: also USB flash at 0x0
+#  - SIGNALDuino_<env>*_factory.bin   -> ESP32 first flash via USB at address 0x0 (bootloader + partitions + app)
+# esp32s / esp32cc1101: Arduino core 3.x (pioarduino), esp32cc1101_core2: Arduino core 2.0.14 (fallback)
 # on push / manual start all files are also stored as draft release (one draft per branch, older drafts of the branch are replaced)
 on:
   workflow_dispatch: null
@@ -25,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        envName: [esp32cc1101, esp32s]
+        envName: [esp32cc1101, esp32s, esp32cc1101_core2, esp8266cc1101, esp8266s]
 
     runs-on: ubuntu-latest
     steps:
@@ -40,11 +41,12 @@ jobs:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
-          key: ${{ matrix.envName }}-pio
+          key: ${{ matrix.envName }}-pio-${{ hashFiles('platformio.ini') }}
+          restore-keys: ${{ matrix.envName }}-pio-
 
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
       - name: Install PlatformIO Core and esptool
         run: pip install --upgrade platformio esptool
@@ -55,7 +57,7 @@ jobs:
           set -o pipefail
           pio run -e ${{ matrix.envName }} | tee build.log
           BUILD=.pio/build/${{ matrix.envName }}
-          APP=$(find $BUILD -maxdepth 1 -name 'SIGNALDuino*.bin' | head -n1)
+          APP=$(find $BUILD -maxdepth 1 -name 'SIGNALDuino*.bin' ! -name '*factory.bin' | head -n1)
           [ -n "$APP" ] || APP=$BUILD/firmware.bin
           NAME=$(basename "$APP" .bin)
           echo "APP=$APP" >> $GITHUB_OUTPUT
@@ -66,14 +68,26 @@ jobs:
       - name: Create factory image
         run: |
           BUILD=.pio/build/${{ matrix.envName }}
-          BOOTAPP0=$(find ~/.platformio/packages/framework-arduinoespressif32 -name boot_app0.bin | head -n1)
+          APP="${{ steps.compile.outputs.APP }}"
+          NAME="${{ steps.compile.outputs.NAME }}"
           mkdir -p dist
-          cp "${{ steps.compile.outputs.APP }}" dist/
-          python -m esptool --chip esp32 merge_bin -o dist/${{ steps.compile.outputs.NAME }}_factory.bin \
-            0x1000 $BUILD/bootloader.bin \
-            0x8000 $BUILD/partitions.bin \
-            0xe000 "$BOOTAPP0" \
-            0x10000 "${{ steps.compile.outputs.APP }}"
+          cp "$APP" dist/
+          case "${{ matrix.envName }}" in
+            esp8266*)                                  # app is flashed at 0x0, no factory image needed
+              ;;
+            *)
+              if [ -f "$BUILD/$NAME.factory.bin" ]; then # pioarduino creates the factory image
+                cp "$BUILD/$NAME.factory.bin" "dist/${NAME}_factory.bin"
+              else                                     # core 2.x
+                BOOTAPP0=$(find ~/.platformio/packages/framework-arduinoespressif32 -name boot_app0.bin | head -n1)
+                python -m esptool --chip esp32 merge-bin -o "dist/${NAME}_factory.bin" \
+                  0x1000 $BUILD/bootloader.bin \
+                  0x8000 $BUILD/partitions.bin \
+                  0xe000 "$BOOTAPP0" \
+                  0x10000 "$APP"
+              fi
+              ;;
+          esac
           ls -l dist
 
       - name: Job summary
@@ -83,7 +97,11 @@ jobs:
           echo "|-------|-----|" >> $GITHUB_STEP_SUMMARY
           echo "| ${{ steps.compile.outputs.FLASH }} | ${{ steps.compile.outputs.RAM }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "\`${{ steps.compile.outputs.NAME }}.bin\`: OTA update (/update), \`${{ steps.compile.outputs.NAME }}_factory.bin\`: USB flash at 0x0" >> $GITHUB_STEP_SUMMARY
+          if [ -f "dist/${{ steps.compile.outputs.NAME }}_factory.bin" ]; then
+            echo "\`${{ steps.compile.outputs.NAME }}.bin\`: OTA update (/update), \`${{ steps.compile.outputs.NAME }}_factory.bin\`: USB flash at 0x0" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "\`${{ steps.compile.outputs.NAME }}.bin\`: OTA update (/update) or USB flash at 0x0" >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -94,7 +112,7 @@ jobs:
 
   release:
     needs: build
-    if: github.event_name != 'pull_request'
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}   # also if single environments failed
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -121,8 +139,9 @@ jobs:
           {
             echo "ESP32 firmware, branch \`${{ github.ref_name }}\`, commit ${{ github.sha }}"
             echo ""
-            echo "- \`*_factory.bin\`: first flash via USB at address 0x0"
-            echo "- other \`.bin\`: OTA update via web configuration (/update)"
+            echo "- \`*_factory.bin\` (ESP32): flash via USB at address 0x0 (new partition table with 1.9 MB app, erases the configuration: make a backup first)"
+            echo "- other \`.bin\`: OTA update via web configuration (/update), ESP8266 also USB flash at 0x0"
+            echo "- \`esp32*\`: Arduino core 3.x, \`esp32cc1101_core2\`: Arduino core 2.0.14"
           } > notes.md
           gh release create "$TAG" dist/*.bin --draft --target "${{ github.sha }}" \
             --title "SIGNALDuino ESP32 ${{ github.ref_name }} $SHA" --notes-file notes.md

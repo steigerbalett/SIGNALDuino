@@ -67,23 +67,19 @@ WMBus can be used on one module at a time. All pins (SCK, MISO, MOSI, CS/GDO0/GD
 
 ### ESP32 builds (GitHub Actions)
 
-`.github/workflows/esp32.yml` builds `esp32cc1101` and `esp32s` on every push and pull request. The artifacts contain
-`SIGNALDuino_<env>*.bin` for the OTA update (`/update`) and `SIGNALDuino_<env>*_factory.bin` to flash via USB at address 0x0.
-On push and manual start all four files are also stored as draft release (Releases page, one draft per branch, the previous draft of the branch is replaced).
+`.github/workflows/esp32.yml` builds `esp32cc1101`, `esp32s`, `esp32cc1101_core2`, `esp8266cc1101` and `esp8266s` on every push and pull request.
+The artifacts contain `SIGNALDuino_<env>*.bin` for the OTA update (`/update`, ESP8266 also USB flash at 0x0) and for ESP32 `SIGNALDuino_<env>*_factory.bin` to flash via USB at address 0x0.
+On push and manual start all files are also stored as draft release (Releases page, one draft per branch, the previous draft of the branch is replaced).
 Publishing the draft creates the tag `esp32-<branch>-<commit>`. Requires "Read and write permissions" for workflows (Settings > Actions > General) if the repository restricts the token.
 
-#### Flash the factory image with a web installer
+#### Arduino core 3.x (pioarduino)
 
-The `_factory.bin` contains bootloader, partition table and firmware and is flashed at address **0x0**. No software installation is needed,
-a browser with Web Serial support (Chrome, Edge, Opera on desktop) is enough:
+`esp32s` and `esp32cc1101` use Arduino core 3.x (ESP-IDF 5) from [pioarduino](https://github.com/pioarduino/platform-espressif32), the official PlatformIO platform only provides core 2.x.
+`esp32cc1101_core2` (core 2.0.14, ESP-IDF 4.4) is kept as fallback. The core 3 builds use the partition table `min_spiffs.csv` (2 x 1.9 MB app instead of 2 x 1.25 MB).
 
-* **Espressif esptool-js** (official): https://espressif.github.io/esptool-js/
-  Connect the ESP32 via USB, click *Connect*, select the serial port, set *Flash Address* to `0x0`, choose the `_factory.bin`, click *Program*.
-  Optional *Erase Flash* before programming deletes the stored WiFi and CC1101 configuration.
-* **ESPHome Web**: https://web.esphome.io/ , *Connect*, *Install*, select the `_factory.bin` (written at 0x0).
-
-If the port does not appear, install the USB driver (CP210x or CH340) or hold the BOOT button while connecting.
-After flashing, connect to the open WiFi access point of the SIGNALDuino to configure WiFi. Later updates use the OTA `.bin` via `/update`.
+* Update from a core 2 firmware via OTA works as long as the firmware is smaller than 1.25 MB (currently about 1.1 MB), the configuration is kept.
+* The larger partitions are only used after flashing the `_factory.bin` via USB. This also erases the configuration (EEPROM in NVS) and WiFi settings, so make a backup (`/bk`) first and restore it afterwards.
+* Local build: PlatformIO Core 6.1 or newer, in VS Code the PlatformIO or pioarduino IDE extension.
 
 ### Signal from my device ist not detected
 
