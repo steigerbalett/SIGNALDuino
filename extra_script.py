@@ -29,17 +29,41 @@ build_name = "SIGNALDuino_" + env['PIOENV']
 # Build versions with a point are difficult to process
 # System uses dot for file extension
 
+import re
+
+def git_basetag():
+    # latest tag, forks / shallow clones may have no tags -> version from compile_config.h + commit
+    try:
+        return (
+            subprocess.check_output(["git", "describe", "--tags", "--first-parent", "--abbrev=1"], stderr=subprocess.DEVNULL)
+            .strip()
+            .decode("utf-8")
+        )
+    except Exception:
+        pass
+    version = "0.0.0"
+    try:
+        with open(os.path.join("src", "compile_config.h"), encoding="utf-8") as f:
+            m = re.search(r'#define\s+PROGVERS\s+"([0-9.]+)', f.read())
+            if m:
+                version = m.group(1)
+    except Exception:
+        pass
+    try:
+        sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).strip().decode("utf-8")
+        return version + "-g" + sha
+    except Exception:
+        return version
+
 reftype = os.environ.get('GITHUB_REF_TYPE','local')
-basetag = (
-    subprocess.check_output(["git", "describe", "--tags", "--first-parent", "--abbrev=1"])
-    .strip()
-    .decode("utf-8")
-)
+basetag = git_basetag()
+# GITHUB_REF_SLUG is set by rlespinasse/github-slug-action, else use GITHUB_REF_NAME
+refslug = os.environ.get('GITHUB_REF_SLUG') or re.sub(r'[^a-zA-Z0-9._-]', '-', os.environ.get('GITHUB_REF_NAME', ''))
 
 if (reftype == 'branch') :
-    build_version = basetag+os.environ.get('GITHUB_REF_SLUG')+"+"+date
+    build_version = basetag+refslug+"+"+date
 elif (reftype == 'tag') :
-    build_version = os.environ.get('GITHUB_REF_SLUG',basetag+"+"+date)
+    build_version = refslug or (basetag+"+"+date)
 else:
     build_version = basetag+"+"+date
 
