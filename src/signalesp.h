@@ -92,16 +92,36 @@ SimpleFIFO<int, FIFO_LENGTH> FiFos[NUM_RADIO]; //store FIFO_LENGTH # ints per ra
 #include "WiFiManager.h"           // https://github.com/tzapu/WiFiManager
 WiFiManager wifiManager;
 WiFiManagerParameter custom_field; // global param ( for non blocking w params )
-// access point for the first WiFi setup without password (open AP)
-// 2025-02-13 - Arduino Release v3.1.2 based on ESP-IDF v5.3 (seit dem AP nicht mehr ohne Passwort, ohne PW Neustart)
-// -> with ESP-IDF 5.x the password stays, can be overwritten with build flag -D WM_AP_PASSWORD=\"\"
+// access point for the first WiFi setup without password (open AP), all cores incl. ESP-IDF 5.x
+// 2025-02-13 - Arduino Release v3.1.2 based on ESP-IDF v5.3: restarts were reported with open AP. The open AP path
+// in the core (AP.cpp: authmode WIFI_AUTH_OPEN) is correct, the reset reason is now shown on serial / status page.
+// A password (min. 8 chars) can be set with build flag -D WM_AP_PASSWORD=\"signalesp\"
 #ifndef WM_AP_PASSWORD
-  #if defined(ESP32) && defined(ESP_IDF_VERSION_MAJOR) && ESP_IDF_VERSION_MAJOR >= 5
-    #define WM_AP_PASSWORD "signalesp"
-  #else
-    #define WM_AP_PASSWORD ""            // open access point
-  #endif
+  #define WM_AP_PASSWORD ""              // open access point
 #endif
+
+#ifdef ESP32
+  #include "esp_system.h"
+#endif
+String resetReason() {                   // reason of the last restart
+#ifdef ESP32
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:   return F("Power on");
+    case ESP_RST_EXT:       return F("External pin");
+    case ESP_RST_SW:        return F("Software (restart)");
+    case ESP_RST_PANIC:     return F("Exception / panic");
+    case ESP_RST_INT_WDT:   return F("Interrupt watchdog");
+    case ESP_RST_TASK_WDT:  return F("Task watchdog");
+    case ESP_RST_WDT:       return F("Other watchdog");
+    case ESP_RST_DEEPSLEEP: return F("Deep sleep");
+    case ESP_RST_BROWNOUT:  return F("Brownout (power supply)");
+    case ESP_RST_SDIO:      return F("SDIO");
+    default:                return F("Unknown");
+  }
+#else
+  return ESP.getResetReason();
+#endif
+}
 #include "web-config.h"
 #include "wifi-config.h"
 
@@ -204,6 +224,8 @@ void setup() {
   while (!Serial) {
     delay(90); // wait for serial port to connect. Needed for native USB
   }
+  Serial.print(F("Reset reason: "));
+  Serial.println(resetReason());
 
   for (uint8_t r = 0; r < NUM_RADIO; r++) {
     Servers[r] = new WiFiServer(RADIO_PORT_BASE + r);

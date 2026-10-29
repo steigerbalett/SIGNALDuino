@@ -152,6 +152,9 @@ void handleSignal() {
   page += String(ESP.getVcc() / 1000.0, 2); // using a float and 2 decimal places
   page += F(" Volt</dd>");
 #endif
+  page += F("<dt>Letzter Neustart</dt><dd>");
+  page += resetReason();
+  page += F("</dd>");
   page += F("<dt>WiFi RSSI</dt><dd>");
   page += WiFi.RSSI();
   page += F(" dBm</dd>");
