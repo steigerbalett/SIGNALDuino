@@ -28,6 +28,7 @@ extern bool radioUsed[NUM_RADIO];
 
 bool webKeepOpen = false;               // set as soon as the config page has been opened
 bool webPortalOn = true;
+uint32_t webRestartAt = 0;              // restart requested (millis), done in loop after the response is sent
 
 const char WEB_SEL[] PROGMEM = " selected";
 const char WEB_CHK[] PROGMEM = " checked";
@@ -376,8 +377,7 @@ static void handleConfigRadio() {
       p += F("<meta http-equiv='refresh' content='15;url=/sd'>Gespeichert, Neustart ...");
       p += FPSTR(HTTP_END);
       WS->send(200, FPSTR(HTTP_HEAD_CT), p);
-      delay(500);
-      ESP.restart();
+      webRestartAt = millis() + 1000;           // restart from loop, after the response is sent
       return;
     }
     WS->sendHeader(F("Location"), WS->uri() + F("?m=") + curRadio + (pinErr ? F("&e=1") : F("")));   // PRG, avoid resubmit on reload
@@ -510,8 +510,76 @@ void handleConfig() {
   curRadio = remRadio;
 }
 
+#ifdef ESP32
+/*
+ * OTA update (/u), replaces the WiFiManager handler (registered first in bindServerCallback):
+ * - receiving is stopped before flashing (interrupts, cron timer, CC1101 idle)
+ * - the restart is done from loop after the response has been sent completely,
+ *   the result page reloads the start page after the restart
+ */
+#include <Update.h>
+extern esp_timer_handle_t cronTimer_handle;
+static bool webOtaRadioStopped = false;
+
+static void webOtaStopRadios() {
+  if (webOtaRadioStopped) return;
+  webOtaRadioStopped = true;
+  esp_timer_stop(cronTimer_handle);
+  const uint8_t remRadio = curRadio;
+  for (curRadio = 0; curRadio < NUM_RADIO; curRadio++) {
+    if (radioUsed[curRadio]) disableReceive();
+  }
+  curRadio = remRadio;
+}
+
+static void handleOtaUpload() {
+  HTTPUpload &upload = WS->upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    webKeepOpen = true;
+    webOtaStopRadios();
+    DBG_PRINT(F("OTA start ")); DBG_PRINTLN(upload.filename);
+    Update.begin(UPDATE_SIZE_UNKNOWN);
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (!Update.hasError()) Update.write(upload.buf, upload.currentSize);
+  } else if (upload.status == UPLOAD_FILE_END) {
+    Update.end(true);
+  } else if (upload.status == UPLOAD_FILE_ABORTED) {
+    Update.abort();
+  }
+  delay(0);
+}
+
+static void handleOtaDone() {
+  const bool ok = !Update.hasError() && Update.isFinished();
+  String p;
+  webHead(p);
+  p += F("<meta http-equiv='refresh' content='20;url=/'>");
+  if (ok) {
+    p += F("<h3>Update erfolgreich</h3>Neustart, die Seite wird in 20 s neu geladen ...");
+  } else {
+    p += F("<h3>Update fehlgeschlagen</h3>");
+    p += Update.errorString();
+    p += F("<br>Neustart mit der bisherigen Firmware ...");
+  }
+  p += FPSTR(HTTP_END);
+  WS->sendHeader(F("Connection"), F("close"));
+  WS->send(200, FPSTR(HTTP_HEAD_CT), p);
+  webRestartAt = millis() + 1500;                // also after an error: receiving was stopped
+}
+
+void webOtaBind() {
+  WS->on("/u", HTTP_POST, handleOtaDone, handleOtaUpload);
+}
+#endif
+
 // stop web server after WEB_TIMEOUT_MS uptime, if nobody opened the configuration page
 inline void webConfigLoop() {
+  if (webRestartAt && (int32_t)(millis() - webRestartAt) >= 0) {
+    WS->stop();
+    WiFi.disconnect(true);
+    delay(100);
+    ESP.restart();
+  }
   if (webPortalOn && !webKeepOpen && !wifiManager.getConfigPortalActive() && millis() > WEB_TIMEOUT_MS) {
     wifiManager.stopWebPortal();
     webPortalOn = false;

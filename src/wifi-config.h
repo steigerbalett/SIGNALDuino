@@ -165,6 +165,9 @@ void handleSignal() {
 }
 
 void bindServerCallback() {
+#ifdef ESP32
+  webOtaBind();                                          // before WiFiManager registers its own /u
+#endif
   wifiManager.server->on("/custom", handleSignal);
   wifiManager.server->on("/sd", handleConfig);
   if (!wifiManager.getConfigPortalActive()) {           // connected: start page = SIGNAL-ESP config, AP mode: WiFiManager
