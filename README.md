@@ -64,6 +64,19 @@ WMBus can be used on one module at a time. All pins (SCK, MISO, MOSI, CS/GDO0/GD
 On push and manual start all four files are also stored as draft release (Releases page, one draft per branch, the previous draft of the branch is replaced).
 Publishing the draft creates the tag `esp32-<branch>-<commit>`. Requires "Read and write permissions" for workflows (Settings > Actions > General) if the repository restricts the token.
 
+#### Flash the factory image with a web installer
+
+The `_factory.bin` contains bootloader, partition table and firmware and is flashed at address **0x0**. No software installation is needed,
+a browser with Web Serial support (Chrome, Edge, Opera on desktop) is enough:
+
+* **Espressif esptool-js** (official): https://espressif.github.io/esptool-js/
+  Connect the ESP32 via USB, click *Connect*, select the serial port, set *Flash Address* to `0x0`, choose the `_factory.bin`, click *Program*.
+  Optional *Erase Flash* before programming deletes the stored WiFi and CC1101 configuration.
+* **ESPHome Web**: https://web.esphome.io/ , *Connect*, *Install*, select the `_factory.bin` (written at 0x0).
+
+If the port does not appear, install the USB driver (CP210x or CH340) or hold the BOOT button while connecting.
+After flashing, connect to the open WiFi access point of the SIGNALDuino to configure WiFi. Later updates use the OTA `.bin` via `/update`.
+
 ### Signal from my device ist not detected
 
 Implemented is a pattern detection engine, that can detect serval signal types. May not all, but most of them.
