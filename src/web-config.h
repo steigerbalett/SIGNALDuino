@@ -668,8 +668,7 @@ static void handleConfigRadio() {
   p += settingStr(EE_SET_PASS, EE_SET_PASSLEN).length() ? F("unver&auml;ndert") : F("kein Schutz");
   p += F("'> ");
   webCheck(p, "ax", F("Passwort l&ouml;schen"), false);
-  p += F("<br><small>Sch&uuml;tzt Konfiguration, Status und OTA-Update (nicht im WLAN-Setup-Modus).</small></td></tr>"
-         "<tr><td>Konfiguration</td><td><a href='/bk'>Backup herunterladen</a></td></tr>");
+  p += F("<br><small>Sch&uuml;tzt Konfiguration, Status und OTA-Update (nicht im WLAN-Setup-Modus).</small></td></tr>");
 #endif
   p += F("</table></fieldset>");
 
@@ -695,7 +694,9 @@ static void handleConfigRadio() {
   p += F("</form>");
 #ifdef ESP32
   p += F("<form method='post' action='/rs' enctype='multipart/form-data' onsubmit=\"return confirm('Konfiguration wiederherstellen und neu starten?')\">"
-         "<fieldset><legend>Wiederherstellen</legend><input type='file' name='f' accept='.sdc'> <button>Backup einspielen</button></fieldset></form>");
+         "<fieldset><legend>Backup</legend><button type='button' onclick=\"location.href='/bk'\">Backup erstellen (Download)</button><br>"
+         "<input type='file' name='f' accept='.sdc'> <button>Backup einspielen</button>"
+         "<br><small>Sichert die komplette Konfiguration aller Module, B&auml;nke, Pins und Systemeinstellungen (ohne WLAN-Zugangsdaten).</small></fieldset></form>");
 #endif
   p += F("<hr><a href='/wifi'>WLAN</a> | <a href='/update'>Firmware-Update (OTA)</a> | <a href='/info'>Info</a> | <a href='/custom'>Status</a> | <a href='/param'>Theme</a>"
          "<br><small>Der Webserver bleibt bis &bdquo;Speichern &amp; Neustart&ldquo; aktiv.</small>");
