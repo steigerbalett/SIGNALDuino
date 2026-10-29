@@ -92,6 +92,16 @@ SimpleFIFO<int, FIFO_LENGTH> FiFos[NUM_RADIO]; //store FIFO_LENGTH # ints per ra
 #include "WiFiManager.h"           // https://github.com/tzapu/WiFiManager
 WiFiManager wifiManager;
 WiFiManagerParameter custom_field; // global param ( for non blocking w params )
+// access point for the first WiFi setup without password (open AP)
+// 2025-02-13 - Arduino Release v3.1.2 based on ESP-IDF v5.3 (seit dem AP nicht mehr ohne Passwort, ohne PW Neustart)
+// -> with ESP-IDF 5.x the password stays, can be overwritten with build flag -D WM_AP_PASSWORD=\"\"
+#ifndef WM_AP_PASSWORD
+  #if defined(ESP32) && defined(ESP_IDF_VERSION_MAJOR) && ESP_IDF_VERSION_MAJOR >= 5
+    #define WM_AP_PASSWORD "signalesp"
+  #else
+    #define WM_AP_PASSWORD ""            // open access point
+  #endif
+#endif
 #include "web-config.h"
 #include "wifi-config.h"
 
@@ -340,10 +350,7 @@ curRadio = 0;
   wifiManager.addParameter(&custom_field);
   wifiManager.setSaveParamsCallback(saveParamCallback);
 
-  wifiManager.autoConnect(hostName.c_str(),"signalesp"); // hostname, password
-  // wm:AccessPoint set password is INVALID or <8 chars
-  // 2025-02-13 - Arduino Release v3.1.2 based on ESP-IDF v5.3 (seit dem AP nicht mehr ohne Passwort, ohne PW Neustart)
-  // wifiManager.autoConnect(hostName.c_str()); // if you just want an unsecured access point
+  wifiManager.autoConnect(hostName.c_str(), WM_AP_PASSWORD); // hostname, password ("" = open AP, else min. 8 chars)
 
   wifiManager.setConfigPortalBlocking(false);
   wifiManager.startWebPortal();
