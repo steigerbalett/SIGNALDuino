@@ -13,6 +13,7 @@ uint8_t ccBufs[NUM_RADIO][ccMaxBuf]; // for cc1101 FIFO, one per radio
 int8_t cc1101::freqOffAccs[NUM_RADIO];
 float cc1101::freqErrAvgs[NUM_RADIO];
 #define HAS_PIN_SEND (PIN_SEND != RADIO_NO_PIN)
+#define revision revisions[curRadio]   // local only, see radio.h
 #else
 uint8_t cc1101::ccmode = 3;          // MDMCFG2–Modem Configuration Bit 6:4 default ASK/OOK
 uint8_t cc1101::revision = 0x01;

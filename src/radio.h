@@ -20,6 +20,7 @@
 #if defined(ESP32) || defined(ESP8266)
 
 #include <stdint.h>
+#include <Arduino.h>   // parse core / ESP-IDF headers before the name mapping macros below are defined
 
 #define RADIO_CTX
 
@@ -101,7 +102,7 @@ namespace cc1101 {
 #define IB_1                   IB_1s[curRadio]
 #define lastTime               lastTimes[curRadio]
 #define ccmode                 ccmodes[curRadio]
-#define revision               revisions[curRadio]
+// revision -> revisions[curRadio] is only mapped inside cc1101.cpp, the name clashes with ESP-IDF (esp_chip_info_t::revision)
 #define freqOffAcc             freqOffAccs[curRadio]
 #define freqErrAvg             freqErrAvgs[curRadio]
 // declared where the types are known: musterDecs (functions.h), FiFos (functions.h), serverClients (output.h)
