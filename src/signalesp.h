@@ -141,6 +141,9 @@ SignalDetectorClass musterDecs[NUM_RADIO];
 volatile bool blinkLED = false;
 String cmdstring = "";
 volatile unsigned long lastTimes[NUM_RADIO];
+#ifdef ESP32
+  portMUX_TYPE radioMux = portMUX_INITIALIZER_UNLOCKED;
+#endif
 
 /*
 #define digitalLow(P) digitalWrite(P,LOW)
@@ -190,21 +193,26 @@ void restart(){
 }
 
 void IRAM_ATTR cronjob(__attribute__((unused)) void *pArg) {
+#ifdef ESP8266
   cli();
+#endif
   static uint16_t cnt = 0; // approximately every 35 minutes
 
   for (uint8_t r = 0; r < NUM_RADIO; r++) {  // curRadio is not valid here (timer task)
     if (!radioUsed[r]) continue;
-    const unsigned long  duration = micros() - lastTimes[r];
+    RADIO_LOCK();                    // the pin interrupt runs on the other core
+    const unsigned long now = micros();
+    const unsigned long  duration = now - lastTimes[r];
 
-    if (duration > maxPulse) {       // Auf Maximalwert pruefen.
+    if (duration > maxPulse && duration < 0x80000000UL) {       // Auf Maximalwert pruefen.
       int sDuration = maxPulse;
-      if (isLow(radioPinReceive[r])) {      // Wenn jetzt low ist, ist auch weiterhin low
+      if (!RADIO_PIN_HIGH(radioPinReceive[r])) {      // Wenn jetzt low ist, ist auch weiterhin low
         sDuration = -sDuration;
       }
       FiFos[r].enqueue(sDuration);
-      lastTimes[r] = micros();
+      lastTimes[r] = now;
     }
+    RADIO_UNLOCK();
   }
   RADIO_LED(blinkLED);
   blinkLED = false;
@@ -214,11 +222,15 @@ void IRAM_ATTR cronjob(__attribute__((unused)) void *pArg) {
     getUptime();
     for (uint8_t r = 0; r < NUM_RADIO; r++) {
       musterDecs[r].reset();
+      RADIO_LOCK();
       FiFos[r].flush();
+      RADIO_UNLOCK();
     }
   }
   cnt++;
+#ifdef ESP8266
   sei();
+#endif
 }
 
 
@@ -461,7 +473,9 @@ void loop() {
   if (cc1101::ccmode == 3) {                // ASK/OOK = 3 (default)
 #endif
     while (FiFo.count()>0) {                // Puffer auslesen und an Dekoder uebergeben
+      RADIO_LOCK();                         // count is also changed by the interrupt
       aktVal = FiFo.dequeue();
+      RADIO_UNLOCK();
       state = musterDec.decode(&aktVal);
       if (state) {                          // LED blinken, wenn Meldung dekodiert
         blinkLED = true;

@@ -55,12 +55,7 @@
 #ifdef RADIO_CTX
 // one interrupt routine per radio, curRadio is not valid inside an interrupt
 static void IRAM_ATTR radioPulse(const uint8_t r) {
-  #ifdef ESP32
-    portMUX_TYPE mutex = portMUX_INITIALIZER_UNLOCKED;
-    portENTER_CRITICAL(&mutex);
-  #else
-    cli();
-  #endif
+  RADIO_LOCK_ISR();
   const unsigned long Time = micros();
   const unsigned long  duration = Time - lastTimes[r];
   lastTimes[r] = Time;
@@ -72,16 +67,12 @@ static void IRAM_ATTR radioPulse(const uint8_t r) {
     else {
       sDuration = maxPulse; // Maximalwert set to maxPulse defined in lib.
     }
-    if (isHigh(radioPinReceive[r])) { // Wenn jetzt high ist, dann muss vorher low gewesen sein, und dafuer gilt die gemessene Dauer.
+    if (RADIO_PIN_HIGH(radioPinReceive[r])) { // Wenn jetzt high ist, dann muss vorher low gewesen sein, und dafuer gilt die gemessene Dauer.
       sDuration = -sDuration;
     }
     FiFos[r].enqueue(sDuration);
   } // else => trash
-  #ifdef ESP32
-    portEXIT_CRITICAL(&mutex);
-  #else
-    sei();
-  #endif
+  RADIO_UNLOCK_ISR();
 }
 
 void IRAM_ATTR handleInterrupt0() { radioPulse(0); }

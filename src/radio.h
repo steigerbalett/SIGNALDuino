@@ -87,6 +87,22 @@ extern bool wmbuses[NUM_RADIO];
 extern bool wmbus_ts[NUM_RADIO];
 extern char IB_1s[NUM_RADIO][14];
 extern volatile unsigned long lastTimes[NUM_RADIO];
+
+// one lock for pulse FIFO / lastTimes: written by the pin interrupt, the cronjob timer task (other core) and read in loop
+#ifdef ESP32
+  extern portMUX_TYPE radioMux;
+  #define RADIO_LOCK_ISR()     portENTER_CRITICAL_ISR(&radioMux)
+  #define RADIO_UNLOCK_ISR()   portEXIT_CRITICAL_ISR(&radioMux)
+  #define RADIO_LOCK()         portENTER_CRITICAL(&radioMux)
+  #define RADIO_UNLOCK()       portEXIT_CRITICAL(&radioMux)
+  #define RADIO_PIN_HIGH(p)    (gpio_get_level((gpio_num_t)(p)) != 0)   // fast, IRAM safe (digitalRead of core 3.x checks the peripheral manager)
+#else
+  #define RADIO_LOCK_ISR()
+  #define RADIO_UNLOCK_ISR()
+  #define RADIO_LOCK()         noInterrupts()
+  #define RADIO_UNLOCK()       interrupts()
+  #define RADIO_PIN_HIGH(p)    (digitalRead(p) == HIGH)
+#endif
 namespace cc1101 {
   extern uint8_t ccmodes[NUM_RADIO];
   extern uint8_t revisions[NUM_RADIO];
