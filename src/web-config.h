@@ -199,6 +199,42 @@ static void rfPresetLoad(uint8_t n) {          // factory settings + preset regi
   storeFunctions(musterDec.MSenabled, musterDec.MUenabled, musterDec.MCenabled, musterDec.MredEnabled, AfcEnabled, wmbus, wmbus_t);  // incl. commit, WMBus init
 }
 
+static void ccDefaults(bool f868) {             // SlowRF defaults 433.92 / 868.35 MHz (FHEM rfmode SlowRF)
+  cc1101::ccFactoryReset();
+  if (f868) {
+    static const uint8_t freq868[] = {0x21, 0x65, 0xE8};   // 868.350 MHz (FREQ2..0)
+    for (uint8_t i = 0; i < 3; i++) EEPROM.write(EEADR(EE_CC1101_CFG + CC1101_FREQ2 + i), freq868[i]);
+    EEPROM.write(EEADR(EE_CC1101_PA + 1), 0x81);          // 5 dBm for 868 MHz
+  }
+  EEPROM.write(EEADR(EE_BANK_ACT), 0xFF);
+  EEPROM.commit();
+  if (hasCC1101) cc1101::CCinit();
+}
+
+static uint8_t rfLast[NUM_RADIO];             // last loaded preset + 1, 0 = none (presets with equal registers)
+
+static String rfPresetActive() {                 // value of the rfmode selection that matches the current registers, "" = none
+  bool slow = true;                              // SlowRF: factory registers, frequency any
+  for (uint8_t i = 0; i < EE_CC1101_CFG_SIZE && slow; i++) {
+    if (i >= CC1101_FREQ2 && i <= CC1101_FREQ0) continue;
+    if (i == 0x03 || i == 0x10 || i == 0x1B || i == 0x1D || i == 0x21) continue;   // FIFOTHR, bWidth, rAmpl, sens, FREND1 changeable
+    slow = ccEE(i) == pgm_read_byte(&cc1101::initVal[i]);
+  }
+  if (slow) return ccEE(CC1101_FREQ2) >= 0x20 ? F("s8") : F("s4");
+  uint16_t i = 0;
+  int8_t found = -1;
+  for (uint8_t n = 0; i < sizeof(rfPresetReg); n++) {
+    const uint8_t cnt = pgm_read_byte(&rfPresetReg[i++]);
+    bool ok = true;
+    for (uint8_t k = 0; k < cnt; k++, i += 2) {
+      const uint8_t reg = pgm_read_byte(&rfPresetReg[i]);
+      if (reg < EE_CC1101_CFG_SIZE && ccEE(reg) != pgm_read_byte(&rfPresetReg[i + 1])) ok = false;
+    }
+    if (ok && (found < 0 || n + 1 == rfLast[curRadio])) found = n;
+  }
+  return found < 0 ? String() : String(found);
+}
+
 // ------------------------------- banks -------------------------------
 // bank layout: [0] marker, [1..0x29] cc1101 regs, [0x2A..0x31] patable, [0x32] features, [0x33..0x3F] name
 
@@ -501,7 +537,7 @@ static void handleConfigRadio() {
       EEPROM.write(EE_SET_LEDINV, 0);
 #endif
       EEPROM.commit();
-    } else if (a != "bl" && a != "fr" && a != "f8" && a != "rm" && WS->hasArg("p00")) {
+    } else if (a != "bl" && a != "rm" && WS->hasArg("p00")) {
       pinErr = !webSavePins();
     }
 #endif
@@ -509,18 +545,13 @@ static void handleConfigRadio() {
     uint8_t b = WS->arg(F("b")).toInt() % EE_BANK_COUNT;
     if (a == "bl") {
       bankLoad(b);
-    } else if (a == "rm") {
-      rfPresetLoad(WS->arg(F("rf")).toInt());
-    } else if (a == "fr" || a == "f8") {      // defaults 433.92 / 868.35 MHz (SlowRF, FHEM rfmode SlowRF_ccFactoryReset)
-      cc1101::ccFactoryReset();
-      if (a == "f8") {
-        static const uint8_t freq868[] = {0x21, 0x65, 0xE8};   // 868.350 MHz (FREQ2..0)
-        for (uint8_t i = 0; i < 3; i++) EEPROM.write(EEADR(EE_CC1101_CFG + CC1101_FREQ2 + i), freq868[i]);
-        EEPROM.write(EEADR(EE_CC1101_PA + 1), 0x81);          // 5 dBm for 868 MHz
+    } else if (a == "rm") {                     // rfmode of this module: SlowRF 433 / 868 or FSK preset
+      const String rf = WS->arg(F("rf"));
+      if (rf == "s4" || rf == "s8") ccDefaults(rf == "s8");
+      else if (rf.length()) {
+        rfPresetLoad(rf.toInt());
+        rfLast[curRadio] = rf.toInt() + 1;
       }
-      EEPROM.write(EEADR(EE_BANK_ACT), 0xFF);
-      EEPROM.commit();
-      if (hasCC1101) cc1101::CCinit();
     } else
 #endif
     {
@@ -607,6 +638,21 @@ static void handleConfigRadio() {
     p += (i & 7) == 7 ? F(" | ") : F(" ");
   }
   p += F("</small></fieldset>");
+
+  {                                             // rfmode of this module
+    const String act = rfPresetActive();
+    p += F("<fieldset><legend>rfmode ");
+    p += radioName(curRadio);
+    p += F("</legend><select name='rf'>");
+    if (!act.length()) webOpt(p, String(), F("benutzerdefiniert"), true);
+    webOpt(p, F("s4"), F("SlowRF 433 MHz (ASK/OOK, Standard)"), act == "s4");
+    webOpt(p, F("s8"), F("SlowRF 868 MHz (ASK/OOK, Standard)"), act == "s8");
+    String n;
+    for (uint8_t i = 0; (n = rfPresetName(i)).length(); i++) webOpt(p, String(i), n, act == String(i));
+    p += F("</select> <button name='a' value='rm' onclick=\"return confirm('rfmode laden? Die CC1101-Werte dieses Moduls werden ersetzt.')\">rfmode laden</button>"
+           "<br><small>Der aktuelle rfmode ist vorausgew&auml;hlt. SlowRF = Werkseinstellungen, FSK = Register des FHEM-rfmode, WMBus wird bei WMBus_S/T aktiviert. "
+           "In FHEM die passenden MN-Protokolle aktivieren, Attribut rfmode nicht zus&auml;tzlich setzen.</small></fieldset>");
+  }
 #endif
 
 #ifdef RADIO_PIN_CFG
@@ -678,18 +724,6 @@ static void handleConfigRadio() {
   webPins(p);
 #endif
 #ifdef CMP_CC1101
-  p += F(" <button name='a' value='fr' onclick=\"return confirm('Standardwerte 433 MHz laden?')\">Standard 433 MHz</button>"
-         " <button name='a' value='f8' onclick=\"return confirm('Standardwerte 868 MHz laden?')\">Standard 868 MHz</button>");
-  {
-    p += F("<fieldset><legend>rfmode (FSK-Presets aus FHEM)</legend><select name='rf'>");
-    String n;
-    for (uint8_t i = 0; (n = rfPresetName(i)).length(); i++) {
-      p += F("<option value='"); p += i; p += F("'>"); p += n; p += F("</option>");
-    }
-    p += F("</select> <button name='a' value='rm' onclick=\"return confirm('Preset laden? Aktuelle CC1101-Werte werden ersetzt.')\">Preset laden</button>"
-           "<br><small>Werkseinstellungen + Register des FHEM-rfmode, WMBus wird bei WMBus_S/T aktiviert. "
-           "In FHEM die passenden MN-Protokolle aktivieren, Attribut rfmode nicht zus&auml;tzlich setzen.</small></fieldset>");
-  }
 #endif
   p += F("</form>");
 #ifdef ESP32
@@ -698,7 +732,11 @@ static void handleConfigRadio() {
          "<input type='file' name='f' accept='.sdc'> <button>Backup einspielen</button>"
          "<br><small>Sichert die komplette Konfiguration aller Module, B&auml;nke, Pins und Systemeinstellungen (ohne WLAN-Zugangsdaten).</small></fieldset></form>");
 #endif
-  p += F("<hr><a href='/wifi'>WLAN</a> | <a href='/update'>Firmware-Update (OTA)</a> | <a href='/info'>Info</a> | <a href='/custom'>Status</a> | <a href='/param'>Theme</a>"
+  p += F("<hr><button type='button' onclick=\"location.href='/wifi'\">WLAN</button> "
+         "<button type='button' onclick=\"location.href='/update'\">Firmware-Update (OTA)</button> "
+         "<button type='button' onclick=\"location.href='/info'\">Info</button> "
+         "<button type='button' onclick=\"location.href='/custom'\">Status</button> "
+         "<button type='button' onclick=\"location.href='/param'\">Theme</button>"
          "<br><small>Der Webserver bleibt bis &bdquo;Speichern &amp; Neustart&ldquo; aktiv.</small>");
   p += FPSTR(HTTP_END);
   WS->send(200, FPSTR(HTTP_HEAD_CT), p);
