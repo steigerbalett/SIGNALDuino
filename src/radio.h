@@ -8,11 +8,11 @@
  * Every radio has its own telnet port (23 + radio number), its own decoder, FIFO, interrupt and EEPROM configuration,
  * so FHEM sees every CC1101 as its own SIGNALduino.
  *
- * Default pinout ESP32 WROOM (radio 1 = former single CC1101, radio 1-2 as SIGNALESP32 board from Ralf9)
+ * Default pinout ESP32 WROOM, as SIGNALESP32 board from Ralf9 (radio 1 = former single CC1101 = Ralf9 B, radio 2 = A, 3 = C, 4 = D)
  *   radio  port  CS  GDO0(TX)  GDO2(RX)
  *   1      23     5   4        13
  *   2      24    27   26       25
- *   3      25    21   -        22
+ *   3      25    17   21       22
  *   4      26    32   -        33
  * Radios without GDO0 can receive ASK/OOK and xFSK, but only send xFSK (FIFO), no WMBus.
  */
@@ -40,10 +40,10 @@ extern uint8_t curRadio;
 // default pins, on ESP32 they can be changed in the web configuration (stored in EEPROM, EE_PIN_BASE)
 #if NUM_RADIO > 1
   #ifndef RADIO_CS_PINS
-    #define RADIO_CS_PINS      {5, 27, 21, 32}
+    #define RADIO_CS_PINS      {5, 27, 17, 32}
   #endif
   #ifndef RADIO_SEND_PINS
-    #define RADIO_SEND_PINS    {4, 26, RADIO_NO_PIN, RADIO_NO_PIN}
+    #define RADIO_SEND_PINS    {4, 26, 21, RADIO_NO_PIN}
   #endif
   #ifndef RADIO_RECEIVE_PINS
     #define RADIO_RECEIVE_PINS {13, 25, 22, 33}
