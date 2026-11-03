@@ -158,7 +158,7 @@ void handleSignal() {
   page += F("<dt>WiFi RSSI</dt><dd>");
   page += WiFi.RSSI();
   page += F(" dBm</dd>");
-  page += F("</dl><table><tr><th>Modul</th><th>Port</th><th>Frequenz</th><th>Modus</th><th>Nachr.</th><th>RSSI</th><th>FHEM</th></tr>");
+  page += F("</dl><table><tr><th>Modul</th><th>Port</th><th>Frequenz</th><th>Modus</th><th>Nachr.</th><th>RSSI</th><th>FHEM</th><th>Pulse</th><th>FIFO</th><th>MARC</th></tr>");
   const uint8_t remRadio = curRadio;
   for (curRadio = 0; curRadio < NUM_RADIO; curRadio++) {
     if (!radioUsed[curRadio]) continue;
@@ -184,10 +184,19 @@ void handleSignal() {
     page += F("-</td><td>ASK</td><td>"); page += radioMsgCnt[curRadio]; page += F("</td><td>-");
 #endif
     page += F("</td><td>"); page += serverClients[curRadio].connected() ? F("verbunden") : F("-");
+    page += F("</td><td>"); page += radioPulseCnt[curRadio];      // diagnostics: pin interrupts, FIFO fill, CC1101 state (13 = RX)
+    page += F("</td><td>"); page += FiFos[curRadio].count();
+    page += F("</td><td>");
+#ifdef CMP_CC1101
+    if (hasCC1101) page += cc1101::getMARCSTATE() & 0x1F; else
+#endif
+    page += '-';
     page += F("</td></tr>");
   }
   curRadio = remRadio;
-  page += F("</table><small>Nachr. = empfangene Nachrichten seit Neustart, RSSI = aktueller Pegel.</small><hr>");
+  page += F("</table><small>Nachr. = empfangene Nachrichten seit Neustart, RSSI = aktueller Pegel, Pulse = Flanken an GDO2, FIFO = unverarbeitete Pulse, MARC = CC1101-Zustand (13 = RX). Cronjob: ");
+  page += radioCronCnt;
+  page += F("</small><hr>");
   page += F("<p/>Github <a href='https://github.com/RFD-FHEM/SIGNALDuino'>https://github.com/RFD-FHEM/SIGNALDuino</a>");
   page += FPSTR(HTTP_END);
   wifiManager.server->send(200, FPSTR(HTTP_HEAD_CT), page);

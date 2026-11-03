@@ -56,6 +56,7 @@
 // one interrupt routine per radio, curRadio is not valid inside an interrupt
 static void IRAM_ATTR radioPulse(const uint8_t r) {
   RADIO_LOCK_ISR();
+  radioPulseCnt[r]++;
   const unsigned long Time = micros();
   const unsigned long  duration = Time - lastTimes[r];
   lastTimes[r] = Time;

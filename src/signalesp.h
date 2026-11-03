@@ -141,6 +141,8 @@ SignalDetectorClass musterDecs[NUM_RADIO];
 volatile bool blinkLED = false;
 String cmdstring = "";
 volatile unsigned long lastTimes[NUM_RADIO];
+volatile uint32_t radioPulseCnt[NUM_RADIO];
+volatile uint32_t radioCronCnt;
 #ifdef ESP32
   portMUX_TYPE radioMux = portMUX_INITIALIZER_UNLOCKED;
 #endif
@@ -197,6 +199,7 @@ void IRAM_ATTR cronjob(__attribute__((unused)) void *pArg) {
   cli();
 #endif
   static uint16_t cnt = 0; // approximately every 35 minutes
+  radioCronCnt++;
 
   for (uint8_t r = 0; r < NUM_RADIO; r++) {  // curRadio is not valid here (timer task)
     if (!radioUsed[r]) continue;
