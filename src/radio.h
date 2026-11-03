@@ -93,7 +93,10 @@ extern volatile uint32_t radioOvfCnt[NUM_RADIO];    // diagnostics: pulses lost,
 extern uint32_t radioSameSign[NUM_RADIO];           // diagnostics: two pulses with the same sign in a row (level read wrong / pulse lost)
 extern uint32_t radioLoopRate;
 extern volatile uint32_t radioTrashCnt[NUM_RADIO];  // diagnostics: pulses < pulseMin (dropped)
-extern volatile uint32_t radioLevelRep[NUM_RADIO];  // diagnostics: same pin level in two interrupts in a row (edge missed)
+extern volatile uint32_t radioLevelRep[NUM_RADIO];
+extern volatile unsigned long radioPrevEdge[NUM_RADIO]; // glitch filter: edge before lastTimes
+extern volatile int radioPend[NUM_RADIO];           // glitch filter: pulse not yet passed on, 0 = none
+extern volatile bool radioLevel[NUM_RADIO];         // glitch filter: pin level after the last edge  // diagnostics: same pin level in two interrupts in a row (edge missed)
 #define RADIO_TRACE_LEN 64
 extern int radioTrace[RADIO_TRACE_LEN];             // diagnostics: last pulses of radio 1 (decoder input)
 extern uint8_t radioTracePos;                      // diagnostics: loop() runs per second

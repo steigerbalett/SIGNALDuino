@@ -148,6 +148,9 @@ uint32_t radioSameSign[NUM_RADIO];
 uint32_t radioLoopRate;
 volatile uint32_t radioTrashCnt[NUM_RADIO];
 volatile uint32_t radioLevelRep[NUM_RADIO];
+volatile unsigned long radioPrevEdge[NUM_RADIO];
+volatile int radioPend[NUM_RADIO];
+volatile bool radioLevel[NUM_RADIO];
 int radioTrace[RADIO_TRACE_LEN];
 uint8_t radioTracePos;
 #ifdef ESP32
@@ -215,12 +218,11 @@ void IRAM_ATTR cronjob(__attribute__((unused)) void *pArg) {
     const unsigned long  duration = now - lastTimes[r];
 
     if (duration > maxPulse && duration < 0x80000000UL) {       // Auf Maximalwert pruefen.
-      int sDuration = maxPulse;
-      if (!RADIO_PIN_HIGH(radioPinReceive[r])) {      // Wenn jetzt low ist, ist auch weiterhin low
-        sDuration = -sDuration;
-      }
-      FiFos[r].enqueue(sDuration);
+      if (radioPend[r] != 0) FiFos[r].enqueue(radioPend[r]);    // pulse before, from the glitch filter
+      radioPend[r] = 0;
+      FiFos[r].enqueue(radioLevel[r] ? maxPulse : -maxPulse);   // Wenn jetzt low ist, ist auch weiterhin low
       lastTimes[r] = now;
+      radioPrevEdge[r] = now;
     }
     RADIO_UNLOCK();
   }
@@ -258,6 +260,7 @@ void setup() {
   for (uint8_t r = 0; r < NUM_RADIO; r++) {
     Servers[r] = new WiFiServer(RADIO_PORT_BASE + r);
     lastTimes[r] = micros();
+    radioPrevEdge[r] = lastTimes[r];
     AfcEnableds[r] = true;
   }
   

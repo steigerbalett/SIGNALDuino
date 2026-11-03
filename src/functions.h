@@ -54,31 +54,32 @@
 //========================= Pulseauswertung ================================================
 #ifdef RADIO_CTX
 // one interrupt routine per radio, curRadio is not valid inside an interrupt
+// Glitch filter: a pulse is only passed on at the next valid edge. An edge less than pulseMin after the last one
+// is a spike: both edges are removed and the interrupted pulse continues. An edge with the same pin level as the
+// last one (an edge was missed, very short spike) is ignored. So the decoder always gets pulses with alternating polarity.
 static void IRAM_ATTR radioPulse(const uint8_t r) {
   const bool level = RADIO_PIN_HIGH(radioPinReceive[r]);   // read the level first, as close to the edge as possible
   RADIO_LOCK_ISR();
   radioPulseCnt[r]++;
-  {
-    static bool lastLevel[NUM_RADIO];
-    if (level == lastLevel[r]) radioLevelRep[r]++;
-    lastLevel[r] = level;
-  }
   const unsigned long Time = micros();
-  const unsigned long  duration = Time - lastTimes[r];
-  lastTimes[r] = Time;
-  if (duration >= pulseMin) {//kleinste zulaessige Pulslaenge
-    int sDuration;
-    if (duration < maxPulse) {//groesste zulaessige Pulslaenge, max = 32000
-      sDuration = int(duration);
+  if (level == radioLevel[r]) {             // edge missed, spike shorter than the interrupt latency
+    radioLevelRep[r]++;
+  } else {
+    const unsigned long duration = Time - lastTimes[r];
+    radioLevel[r] = level;
+    if (duration < pulseMin) {              // spike: remove it, the pulse before continues
+      radioTrashCnt[r]++;
+      lastTimes[r] = radioPrevEdge[r];
+      radioPend[r] = 0;
+    } else {
+      if (radioPend[r] != 0 && !FiFos[r].enqueue(radioPend[r])) radioOvfCnt[r]++;
+      int sDuration = duration < maxPulse ? int(duration) : maxPulse;   // groesste zulaessige Pulslaenge, max = 32000
+      if (level) sDuration = -sDuration;    // Wenn jetzt high ist, dann muss vorher low gewesen sein
+      radioPend[r] = sDuration;
+      radioPrevEdge[r] = lastTimes[r];
+      lastTimes[r] = Time;
     }
-    else {
-      sDuration = maxPulse; // Maximalwert set to maxPulse defined in lib.
-    }
-    if (level) { // Wenn jetzt high ist, dann muss vorher low gewesen sein, und dafuer gilt die gemessene Dauer.
-      sDuration = -sDuration;
-    }
-    if (!FiFos[r].enqueue(sDuration)) radioOvfCnt[r]++;
-  } else radioTrashCnt[r]++; // else => trash
+  }
   RADIO_UNLOCK_ISR();
 }
 
