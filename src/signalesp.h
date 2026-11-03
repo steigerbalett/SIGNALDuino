@@ -143,6 +143,9 @@ String cmdstring = "";
 volatile unsigned long lastTimes[NUM_RADIO];
 volatile uint32_t radioPulseCnt[NUM_RADIO];
 volatile uint32_t radioCronCnt;
+volatile uint32_t radioOvfCnt[NUM_RADIO];
+uint32_t radioSameSign[NUM_RADIO];
+uint32_t radioLoopRate;
 #ifdef ESP32
   portMUX_TYPE radioMux = portMUX_INITIALIZER_UNLOCKED;
 #endif
@@ -467,6 +470,11 @@ void loop() {
 
   static int aktVal = 0;
   bool state;
+  {                                         // diagnostics: loop runs per second
+    static uint32_t loops = 0, loopT = 0;
+    loops++;
+    if (millis() - loopT >= 1000) { radioLoopRate = loops; loops = 0; loopT = millis(); }
+  }
   for (curRadio = 0; curRadio < NUM_RADIO; curRadio++) {
   if (!radioUsed[curRadio]) continue;
   serialEvent();
@@ -479,6 +487,11 @@ void loop() {
       RADIO_LOCK();                         // count is also changed by the interrupt
       aktVal = FiFo.dequeue();
       RADIO_UNLOCK();
+      {                                     // diagnostics
+        static int lastVal[NUM_RADIO];
+        if ((aktVal ^ lastVal[curRadio]) >= 0 && aktVal != maxPulse && aktVal != -maxPulse) radioSameSign[curRadio]++;
+        lastVal[curRadio] = aktVal;
+      }
       state = musterDec.decode(&aktVal);
       if (state) {                          // LED blinken, wenn Meldung dekodiert
         blinkLED = true;

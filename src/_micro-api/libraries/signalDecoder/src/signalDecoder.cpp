@@ -988,7 +988,7 @@ bool SignalDetectorClass::getClock()
 			continue;
 		}
 
-		if ((pattern[i] >= 0) && (pattern[i] < pattern[tstclock]) && (histo[i] > message.valcount * 0.13)) {
+		if (tstclock != -1 && (pattern[i] >= 0) && (pattern[i] < pattern[tstclock]) && (histo[i] > message.valcount * 0.13)) {
 			tstclock = i;
 		}
 	}

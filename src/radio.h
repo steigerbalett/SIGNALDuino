@@ -89,6 +89,9 @@ extern char IB_1s[NUM_RADIO][14];
 extern volatile unsigned long lastTimes[NUM_RADIO];
 extern volatile uint32_t radioPulseCnt[NUM_RADIO];   // diagnostics: pulses (pin interrupts) per radio
 extern volatile uint32_t radioCronCnt;              // diagnostics: cronjob runs
+extern volatile uint32_t radioOvfCnt[NUM_RADIO];    // diagnostics: pulses lost, FIFO full
+extern uint32_t radioSameSign[NUM_RADIO];           // diagnostics: two pulses with the same sign in a row (level read wrong / pulse lost)
+extern uint32_t radioLoopRate;                      // diagnostics: loop() runs per second
 
 // one lock for pulse FIFO / lastTimes: written by the pin interrupt, the cronjob timer task (other core) and read in loop
 #ifdef ESP32

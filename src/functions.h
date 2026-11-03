@@ -71,7 +71,7 @@ static void IRAM_ATTR radioPulse(const uint8_t r) {
     if (RADIO_PIN_HIGH(radioPinReceive[r])) { // Wenn jetzt high ist, dann muss vorher low gewesen sein, und dafuer gilt die gemessene Dauer.
       sDuration = -sDuration;
     }
-    FiFos[r].enqueue(sDuration);
+    if (!FiFos[r].enqueue(sDuration)) radioOvfCnt[r]++;
   } // else => trash
   RADIO_UNLOCK_ISR();
 }
