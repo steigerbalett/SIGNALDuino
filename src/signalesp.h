@@ -146,6 +146,10 @@ volatile uint32_t radioCronCnt;
 volatile uint32_t radioOvfCnt[NUM_RADIO];
 uint32_t radioSameSign[NUM_RADIO];
 uint32_t radioLoopRate;
+volatile uint32_t radioTrashCnt[NUM_RADIO];
+volatile uint32_t radioLevelRep[NUM_RADIO];
+int radioTrace[RADIO_TRACE_LEN];
+uint8_t radioTracePos;
 #ifdef ESP32
   portMUX_TYPE radioMux = portMUX_INITIALIZER_UNLOCKED;
 #endif
@@ -491,6 +495,7 @@ void loop() {
         static int lastVal[NUM_RADIO];
         if ((aktVal ^ lastVal[curRadio]) >= 0 && aktVal != maxPulse && aktVal != -maxPulse) radioSameSign[curRadio]++;
         lastVal[curRadio] = aktVal;
+        if (curRadio == 0) { radioTrace[radioTracePos] = aktVal; radioTracePos = (radioTracePos + 1) % RADIO_TRACE_LEN; }
       }
       state = musterDec.decode(&aktVal);
       if (state) {                          // LED blinken, wenn Meldung dekodiert

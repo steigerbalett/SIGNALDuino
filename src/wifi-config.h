@@ -158,7 +158,7 @@ void handleSignal() {
   page += F("<dt>WiFi RSSI</dt><dd>");
   page += WiFi.RSSI();
   page += F(" dBm</dd>");
-  page += F("</dl><table><tr><th>Modul</th><th>Port</th><th>Frequenz</th><th>Modus</th><th>Nachr.</th><th>RSSI</th><th>FHEM</th><th>Pulse</th><th>FIFO</th><th>Verlust</th><th>Vorz.</th><th>MARC</th></tr>");
+  page += F("</dl><table><tr><th>Modul</th><th>Port</th><th>Frequenz</th><th>Modus</th><th>Nachr.</th><th>RSSI</th><th>FHEM</th><th>Pulse</th><th>FIFO</th><th>Verlust</th><th>Vorz.</th><th>Kurz</th><th>Pegel</th><th>MARC</th></tr>");
   const uint8_t remRadio = curRadio;
   for (curRadio = 0; curRadio < NUM_RADIO; curRadio++) {
     if (!radioUsed[curRadio]) continue;
@@ -188,6 +188,8 @@ void handleSignal() {
     page += F("</td><td>"); page += FiFos[curRadio].count();
     page += F("</td><td>"); page += radioOvfCnt[curRadio];
     page += F("</td><td>"); page += radioSameSign[curRadio];
+    page += F("</td><td>"); page += radioTrashCnt[curRadio];
+    page += F("</td><td>"); page += radioLevelRep[curRadio];
     page += F("</td><td>");
 #ifdef CMP_CC1101
     if (hasCC1101) page += cc1101::getMARCSTATE() & 0x1F; else
@@ -200,6 +202,11 @@ void handleSignal() {
   page += radioCronCnt;
   page += F(", loop/s: ");
   page += radioLoopRate;
+  page += F("<br>Kurz = Pulse unter 90 us verworfen, Pegel = gleicher Pin-Pegel in zwei Interrupts (Flanke verpasst).<br>Letzte Pulse Modul 1 (us): ");
+  for (uint8_t i = 0; i < RADIO_TRACE_LEN; i++) {
+    page += radioTrace[(radioTracePos + i) % RADIO_TRACE_LEN];
+    page += ' ';
+  }
   page += F("</small><hr>");
   page += F("<p/>Github <a href='https://github.com/RFD-FHEM/SIGNALDuino'>https://github.com/RFD-FHEM/SIGNALDuino</a>");
   page += FPSTR(HTTP_END);

@@ -91,7 +91,12 @@ extern volatile uint32_t radioPulseCnt[NUM_RADIO];   // diagnostics: pulses (pin
 extern volatile uint32_t radioCronCnt;              // diagnostics: cronjob runs
 extern volatile uint32_t radioOvfCnt[NUM_RADIO];    // diagnostics: pulses lost, FIFO full
 extern uint32_t radioSameSign[NUM_RADIO];           // diagnostics: two pulses with the same sign in a row (level read wrong / pulse lost)
-extern uint32_t radioLoopRate;                      // diagnostics: loop() runs per second
+extern uint32_t radioLoopRate;
+extern volatile uint32_t radioTrashCnt[NUM_RADIO];  // diagnostics: pulses < pulseMin (dropped)
+extern volatile uint32_t radioLevelRep[NUM_RADIO];  // diagnostics: same pin level in two interrupts in a row (edge missed)
+#define RADIO_TRACE_LEN 64
+extern int radioTrace[RADIO_TRACE_LEN];             // diagnostics: last pulses of radio 1 (decoder input)
+extern uint8_t radioTracePos;                      // diagnostics: loop() runs per second
 
 // one lock for pulse FIFO / lastTimes: written by the pin interrupt, the cronjob timer task (other core) and read in loop
 #ifdef ESP32

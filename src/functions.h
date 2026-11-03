@@ -55,8 +55,14 @@
 #ifdef RADIO_CTX
 // one interrupt routine per radio, curRadio is not valid inside an interrupt
 static void IRAM_ATTR radioPulse(const uint8_t r) {
+  const bool level = RADIO_PIN_HIGH(radioPinReceive[r]);   // read the level first, as close to the edge as possible
   RADIO_LOCK_ISR();
   radioPulseCnt[r]++;
+  {
+    static bool lastLevel[NUM_RADIO];
+    if (level == lastLevel[r]) radioLevelRep[r]++;
+    lastLevel[r] = level;
+  }
   const unsigned long Time = micros();
   const unsigned long  duration = Time - lastTimes[r];
   lastTimes[r] = Time;
@@ -68,11 +74,11 @@ static void IRAM_ATTR radioPulse(const uint8_t r) {
     else {
       sDuration = maxPulse; // Maximalwert set to maxPulse defined in lib.
     }
-    if (RADIO_PIN_HIGH(radioPinReceive[r])) { // Wenn jetzt high ist, dann muss vorher low gewesen sein, und dafuer gilt die gemessene Dauer.
+    if (level) { // Wenn jetzt high ist, dann muss vorher low gewesen sein, und dafuer gilt die gemessene Dauer.
       sDuration = -sDuration;
     }
     if (!FiFos[r].enqueue(sDuration)) radioOvfCnt[r]++;
-  } // else => trash
+  } else radioTrashCnt[r]++; // else => trash
   RADIO_UNLOCK_ISR();
 }
 
