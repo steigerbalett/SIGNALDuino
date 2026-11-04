@@ -163,10 +163,11 @@ void disableReceive() {
 
 
 //================================= EEProm commands ======================================
+// apply the runtime side effects of the feature flags without storing them in EEPROM
 #if defined (CMP_CC1101) && (defined (ESP8266) || defined (ESP32) || defined (ARDUINO_MAPLEMINI_F103CB))
-  void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t afc, int8_t wmb, int8_t wmb_t) {
+  void applyFunctions(const int8_t afc, const int8_t wmb, const int8_t wmb_t) {
 #else
-  void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t afc) {
+  void applyFunctions(const int8_t afc) {
 #endif
   #ifdef CMP_CC1101
     if (afc == 0) { // reset AFC
@@ -180,6 +181,15 @@ void disableReceive() {
       }
     #endif
   #endif
+}
+
+#if defined (CMP_CC1101) && (defined (ESP8266) || defined (ESP32) || defined (ARDUINO_MAPLEMINI_F103CB))
+  void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t afc, int8_t wmb, int8_t wmb_t) {
+    applyFunctions(afc, wmb, wmb_t);
+#else
+  void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t afc) {
+    applyFunctions(afc);
+#endif
   mu = mu << 1;
   mc = mc << 2;
   red = red << 3;

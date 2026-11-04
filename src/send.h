@@ -12,7 +12,7 @@
 
 #ifndef RADIO_CTX
 extern bool hasCC1101;
-extern char IB_1[14];
+extern char IB_1[15];  // 14 characters + '\0'
 #endif
 
 //================================= RAW Send ======================================

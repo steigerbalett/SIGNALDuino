@@ -85,7 +85,7 @@ extern bool ccDisableds[NUM_RADIO];
 extern bool AfcEnableds[NUM_RADIO];
 extern bool wmbuses[NUM_RADIO];
 extern bool wmbus_ts[NUM_RADIO];
-extern char IB_1s[NUM_RADIO][14];
+extern char IB_1s[NUM_RADIO][15];
 extern volatile unsigned long lastTimes[NUM_RADIO];
 extern volatile uint32_t radioPulseCnt[NUM_RADIO];   // diagnostics: pulses (pin interrupts) per radio
 extern volatile uint32_t radioCronCnt;              // diagnostics: cronjob runs

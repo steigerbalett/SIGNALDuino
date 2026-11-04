@@ -15,7 +15,7 @@
 #include "signalDecoder.h"         // xFSK
 
 #ifndef RADIO_CTX
-extern char IB_1[14];
+extern char IB_1[15];  // 14 characters + '\0'
 #endif
 
 #if defined(ESP8266) || defined(ESP32) || defined(ARDUINO_MAPLEMINI_F103CB)

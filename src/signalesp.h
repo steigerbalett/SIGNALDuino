@@ -178,7 +178,7 @@ uint8_t radioTracePos;
 bool hasCC1101s[NUM_RADIO];
 bool ccDisableds[NUM_RADIO];
 bool AfcEnableds[NUM_RADIO];
-char IB_1s[NUM_RADIO][14];         // Input Buffer one - capture commands
+char IB_1s[NUM_RADIO][15];         // Input Buffer one - capture commands, 14 characters + '\0'
 bool wmbuses[NUM_RADIO];
 bool wmbus_ts[NUM_RADIO];
 const char sos_sequence[] = "0101010001110001110001110001010100000000";
@@ -641,6 +641,7 @@ void serialEvent()
       return;
     } else {
       IB_1[idx] = (char)MSG_PRINTER.read();
+      IB_1[idx + 1] = '\0';  // idx <= 13, IB_1 has room for the terminator
       // DBG_PRINTLN(idx);
       // DBG_PRINT(IB_1[idx]);
 
@@ -667,7 +668,6 @@ void serialEvent()
         case ';':
           DBG_PRINT("send cmd detected ");
           // DBG_PRINTLN(idx);
-          IB_1[idx + 1] = '\0';
           if (idx > 0)
             send_cmd();
           idx = 0; // increments to 1

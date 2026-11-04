@@ -119,7 +119,7 @@ static const uint8_t kInitValSize = 0x29;
 // ---------------------------------------------------------------------------
 TEST_F(Cc1101Test, helpListsCC1101Commands) {
     runShort("?");
-    EXPECT_EQ("? Use one of V R t X S P C r W s x e \n", cap.output());
+    EXPECT_EQ("? Use one of V R t X S P C r W s w x e \n", cap.output());
 }
 
 TEST_F(Cc1101Test, helpWithoutCC1101HardwareOmitsCC1101Commands) {
@@ -644,8 +644,8 @@ TEST_F(Cc1101Test, enableAfcWithoutCC1101Hardware) {
 }
 
 TEST_F(Cc1101Test, decoderFlagWithAfcOffWritesFsctrl0) {
-    // current behaviour: every CE<x>/CD<x> calls storeFunctions(); with AFC off it
-    // resets the frequency offset and writes FSCTRL0 = 0, also without CC1101 hardware
+    // every CE<x>/CD<x> calls storeFunctions(); with AFC off it resets the frequency offset
+    // and writes FSCTRL0 = 0, the chip is only accessed with CC1101 hardware (multi CC1101: no SPI to a missing module)
     for (bool hw : { true, false }) {
         chip().reset();
         hasCC1101 = hw;
@@ -653,8 +653,12 @@ TEST_F(Cc1101Test, decoderFlagWithAfcOffWritesFsctrl0) {
         cc1101::freqOffAcc = 3;
         runShort("CES");
         EXPECT_EQ(0, cc1101::freqOffAcc) << hw;
-        ASSERT_EQ(1u, chip().writes.size()) << hw;
-        EXPECT_EQ(0x0C, chip().writes[0].addr) << hw;
+        if (hw) {
+            ASSERT_EQ(1u, chip().writes.size()) << hw;
+            EXPECT_EQ(0x0C, chip().writes[0].addr) << hw;
+        } else {
+            EXPECT_EQ(0u, chip().writes.size()) << hw;
+        }
     }
 }
 

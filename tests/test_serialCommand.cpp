@@ -1,6 +1,9 @@
 #include <arduino-mock/Arduino.h>
 #include <arduino-mock/Serial.h>
 #include "SimpleFIFO.h"
+#include <fstream>
+#include <iterator>
+#include <string>
 
 #define PROGNAME               " SIGNALESP "
 #define VERSION_1              0x33
@@ -100,11 +103,55 @@ TEST(serialHelper, captureFlashStrings) {
 }
 
 TEST(serialHelper, loadCommandRespectsBufferSize) {
-    EXPECT_TRUE(serialtest::loadCommand("1234567890123"));   // 13 chars + '\0' fit
-    EXPECT_STREQ("1234567890123", IB_1);
-    EXPECT_FALSE(serialtest::loadCommand("12345678901234")); // 14 chars do not fit
+    EXPECT_TRUE(serialtest::loadCommand("12345678901234"));   // 14 chars + '\0' fit
+    EXPECT_STREQ("12345678901234", IB_1);
+    EXPECT_FALSE(serialtest::loadCommand("123456789012345")); // 15 chars do not fit
     EXPECT_TRUE(serialtest::loadCommand("P"));
     EXPECT_EQ('\0', IB_1[1]) << "buffer must be zero padded";
+}
+
+// serialEvent() exists three times (signalduino.h, signalSTM.h, signalesp.h) and cannot be
+// compiled in the native build. This test therefore reads the firmware sources as text
+// and checks what keeps IB_1 a valid string; it does not execute serialEvent().
+static std::string readFirmwareSource(const char* name) {
+    std::string dir(__FILE__);
+    dir = dir.substr(0, dir.find_last_of("/\\") + 1);
+    std::ifstream in(dir + "../src/" + name);
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+static size_t countOccurrences(const std::string& text, const std::string& what) {
+    size_t n = 0;
+    for (size_t pos = text.find(what); pos != std::string::npos; pos = text.find(what, pos + what.size())) n++;
+    return n;
+}
+
+TEST(serialHelper, serialEventVariantsNullTerminateIB_1AfterEveryCharacter) {
+    const char* files[] = { "signalduino.h", "signalSTM.h", "signalesp.h" };
+    const std::string readChar = "IB_1[idx] = (char)MSG_PRINTER.read();";
+    const std::string terminate = "IB_1[idx + 1] = '\\0';";
+    for (const char* file : files) {
+        SCOPED_TRACE(file);
+        const std::string src = readFirmwareSource(file);
+        ASSERT_FALSE(src.empty()) << "firmware source not found";
+
+        // the terminator is written right after the character is stored ...
+        const size_t readPos = src.find(readChar);
+        ASSERT_NE(std::string::npos, readPos);
+        const size_t termPos = src.find(terminate, readPos);
+        ASSERT_NE(std::string::npos, termPos);
+        EXPECT_LT(termPos - readPos, readChar.size() + 8) << "terminator must directly follow the read";
+        // ... and nowhere else (the old ESP write only happened for ';')
+        EXPECT_EQ(1u, countOccurrences(src, terminate));
+
+        // buffer size in the firmware = buffer size used by the tests, 'to long' at 14 characters
+        // signalesp.h: one buffer per radio, char IB_1s[NUM_RADIO][15] (multi CC1101)
+        const std::string def = src.find("char IB_1s[NUM_RADIO][") != std::string::npos ? "char IB_1s[NUM_RADIO][" : "char IB_1[";
+        const size_t defPos = src.find(def);
+        ASSERT_NE(std::string::npos, defPos);
+        EXPECT_EQ(sizeof(IB_1), (size_t)atoi(src.c_str() + defPos + def.size()));
+        EXPECT_EQ(1u, countOccurrences(src, "if (idx == " + std::to_string(sizeof(IB_1) - 1) + ")"));
+    }
 }
 
 // Wiring check: helper + real command dispatcher
@@ -233,5 +280,54 @@ TEST(serial, registerWrite1) {
     commands::HandleShortCommand();
 
     //releaseSerialMock();
+    releaseEEPROMMock();
+}
+
+TEST(serial, registerWriteVolatile) {
+    EEPROMMock* eepromMock = EEPROMMockInstance();
+    strcpy(IB_1, "w1400");
+    blinkLED = false;
+
+    EXPECT_CALL(*eepromMock,write)
+        .Times(0);
+
+    // call processing
+    commands::HandleShortCommand();
+    EXPECT_TRUE(blinkLED); // unsupported commands return before blinkLED is set
+
+    releaseEEPROMMock();
+}
+
+TEST(serial, configVolatile) {
+    EEPROMMock* eepromMock = EEPROMMockInstance();
+    musterDec.MUenabled = false;
+    strcpy(IB_1, "CVEU");
+
+    EXPECT_CALL(*eepromMock,write)
+        .Times(0);
+
+    // call processing
+    commands::HandleShortCommand();
+    EXPECT_TRUE(musterDec.MUenabled);
+
+    strcpy(IB_1, "CVDU");
+    commands::HandleShortCommand();
+    EXPECT_FALSE(musterDec.MUenabled);
+
+    releaseEEPROMMock();
+}
+
+TEST(serial, configPersistent) {
+    EEPROMMock* eepromMock = EEPROMMockInstance();
+    musterDec.MUenabled = false;
+    strcpy(IB_1, "CEU");
+
+    EXPECT_CALL(*eepromMock,write)
+        .Times(1);
+
+    // call processing
+    commands::HandleShortCommand();
+    EXPECT_TRUE(musterDec.MUenabled);
+
     releaseEEPROMMock();
 }

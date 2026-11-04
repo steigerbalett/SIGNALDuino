@@ -14,7 +14,7 @@ Spalte "Schritt": 2 = System-/Konfigurationskommandos, 3 = Sendekommandos, 4 = C
 | Kommando | Gutfall | Fehler-/Grenzfälle | Schritt | Status |
 | :--- | :--- | :--- | :---: | :---: |
 | `V` | Versionsstring `V <PROGVERS><PROGNAME> - compiled at …`; mit CC1101 inkl. `cc1101 (chip CC110x)` | Zusatzzeichen, Chipversionen 03/04/14/05/07/17/unbekannt, Version `00`/`FF` (Rückfall auf Revision 0), `hasCC1101` aus | 2 / 4 | ✅ |
-| `?` | Liste `? Use one of V R t X S P C r W s`, mit CC1101 zusätzlich `x e` | Zusatzzeichen, `hasCC1101` aus | 2 / 4 | ✅ |
+| `?` | Liste `? Use one of V R t X S P C r W s`, mit CC1101 zusätzlich `w x e` | Zusatzzeichen, `hasCC1101` aus | 2 / 4 | ✅ |
 | `R` | freier RAM (`freeRam()`) | Zusatzzeichen | 2 | ✅ |
 | `t` | Uptime in Sekunden (Wert gegen `millis()` des Mocks geprüft) | Überlauf nicht testbar: der arduino-mock leitet `millis()` aus der Systemzeit ab | 2 | ✅ |
 | `P` | `OK` | Zusatzzeichen | 2 | ✅ |
@@ -82,7 +82,9 @@ Ohne `DISABLED_` halten die Tests das aktuelle Verhalten fest, auch wenn es frag
 
 Nur im Code gelesen, im nativen Build nicht kompiliert (`serialEvent()` in `signalduino.h`, `signalSTM.h`, `signalesp.h`):
 
-- ESP: `IB_1[idx + 1] = '\0'` schreibt bei `;` an Position 13 nach `IB_1[14]`, also ein Byte hinter den Puffer.
+- ESP: `IB_1[idx + 1] = '\0'` schrieb bei `;` an Position 13 nach `IB_1[14]`, also ein Byte hinter den Puffer.
+- Alle: bei vollem Puffer gab `Command to long: ` mit `MSG_PRINTLN(IB_1)` 14 Zeichen ohne `\0` aus und las über `IB_1` hinaus. AVR/STM terminierten `IB_1` nie, `DBG_PRINT(IB_1)` in `send_cmd()` las ebenso weiter.
+- Behoben: `IB_1` hat jetzt 15 Bytes (14 Zeichen + `\0`). Alle drei `serialEvent()`-Varianten terminieren nach jedem gelesenen Zeichen, `IB_1` ist also immer ein gültiger String. Die drei `serialEvent()`-Varianten sind nicht kompiliert getestet. Ein Test liest ihre Quelltexte und prüft Terminierung direkt nach dem Lesen, Puffergröße und `idx == 14` (`serialEventVariantsNullTerminateIB_1AfterEveryCharacter`, reine Textprüfung, führt `serialEvent()` nicht aus); dazu die Puffergröße des Testhelfers (`loadCommandRespectsBufferSize`).
 - AVR/STM: ein `;` an Position 0 (Zeile beginnt mit `;`) ruft `send_cmd()` auf. ESP prüft vorher `idx > 0`. Folge wie #267.
 - Bei Timeouts oder zu langen Kommandos landen Reste im Puffer, wie oben beschrieben. `serialEvent()` liest sie als neue Kommandos. Kommt darin ein `;`, wird `send_cmd()` mit einem Teil ohne `S` aufgerufen (#267).
 
@@ -146,7 +148,7 @@ Für Fehlerfälle gibt es `stuckStrobe` (dieser Strobe ändert den Zustand nicht
 `tests/serialCommandHelper.h`:
 
 - `serialtest::SerialCapture` zeichnet alle Ausgaben über `Serial` (`MSG_PRINT`, `MSG_PRINTLN`, `MSG_WRITE`) als String auf. `println` hängt `\n` an, Zahlen werden wie in der Arduino-`Print`-Klasse formatiert.
-- `serialtest::loadCommand(cmd)` kopiert ein Kommando mit Längenprüfung in `IB_1` (max. 13 Zeichen).
+- `serialtest::loadCommand(cmd)` kopiert ein Kommando mit Längenprüfung in `IB_1` (max. 14 Zeichen, wie `serialEvent()` sie ablegt).
 - `serialtest::runShortCommand(cmd)` (in `test_serialCommand.cpp`) hängt wie `serialEvent()` ein `\n` an und ruft `commands::HandleShortCommand()` auf.
 - `SerialCapture::setInput(str, gapAt)` liefert Bytes für `Serial.readBytes()` usw., also den Rest eines Sendekommandos. Mit `gapAt` liefert der erste Lesezugriff an dieser Stelle nichts. Das simuliert einen Serial-Timeout, die restlichen Bytes bleiben im Puffer (`remainingInput()`).
 - `serialtest::receiveState()` zählt die Aufrufe von `disableReceive()`/`enableReceive()` in `send.h`. Sie werden wie `micros()` per Präprozessor nur für `send.h` umgeleitet und rufen die echten Funktionen auf.
