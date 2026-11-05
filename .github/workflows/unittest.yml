@@ -42,6 +42,10 @@ jobs:
 
   build:
     needs: unittest
+    permissions:
+      contents: read
+      actions: read            # CodeQL: workflow run information
+      security-events: write   # CodeQL: upload the results (forks: the default token is read only)
     strategy:
       fail-fast: false
       matrix:
