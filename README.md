@@ -47,7 +47,7 @@ System settings in the web configuration: module names, frequency offset per mod
 also used as start value for AFC), MC min bit length per module, LED pin (empty = no LED) and inverse, hostname, web server timeout
 (minutes, 0 = always on). ESP32 only: user / password (HTTP basic auth for all pages incl. OTA, not in the WiFi setup portal;
 forgotten password: flash with "Erase Flash"), backup (`/bk`, file `.sdc`) and restore of the complete configuration.
-The status page (`/custom`) shows per module frequency, mode, received messages, current RSSI and whether FHEM is connected.
+The status page (`/custom`) shows per module frequency, mode, received messages, current RSSI and whether FHEM is connected. It updates itself every 2.5 s from the JSON endpoint `/api/status` (uptime, loop rate, WiFi RSSI, free heap, per module the values of the table), which can also be used by other tools. On ESP32 a watchdog restarts the firmware if the main loop hangs for more than 15 s (reset reason on the status page: task watchdog).
 
 ### ESP32 with up to 4 CC1101
 

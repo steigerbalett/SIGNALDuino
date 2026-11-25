@@ -129,6 +129,51 @@ String resetReason() {                   // reason of the last restart
   return ESP.getResetReason();
 #endif
 }
+
+// loop watchdog (ESP32): restart if loop() hangs longer than LOOP_WDT_S, started at the end of setup()
+#ifdef ESP32
+  #define LOOP_WDT_S 15
+  static bool loopWdtOn = false;
+  void loopWdtStart() {
+  #if ESP_IDF_VERSION_MAJOR >= 5
+    uint32_t idleMask = 0;               // keep the idle task supervision of the core configuration
+    #ifdef CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0
+      idleMask |= 1 << 0;
+    #endif
+    #ifdef CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1
+      idleMask |= 1 << 1;
+    #endif
+    esp_task_wdt_config_t cfg = { .timeout_ms = LOOP_WDT_S * 1000, .idle_core_mask = idleMask, .trigger_panic = true };
+    if (esp_task_wdt_reconfigure(&cfg) != ESP_OK) esp_task_wdt_init(&cfg);
+  #else
+    esp_task_wdt_init(LOOP_WDT_S, true);  // already initialized: only timeout and panic are changed
+  #endif
+    loopWdtOn = esp_task_wdt_add(NULL) == ESP_OK;
+  }
+  static uint32_t loopWdtPausedAt = 0;  // 0 = not paused
+  void loopWdtPause() {                 // before blocking calls (WiFi connect of WiFiManager, up to minutes)
+    if (loopWdtOn && !loopWdtPausedAt) esp_task_wdt_delete(NULL);
+    loopWdtPausedAt = millis() | 1;
+  }
+  void loopWdtResume() {
+    if (loopWdtOn && loopWdtPausedAt) esp_task_wdt_add(NULL);
+    loopWdtPausedAt = 0;
+  }
+  inline void loopWdtReset() {          // in loop(), a pause ends at the latest after 5 minutes (connect failed, no callback)
+    if (!loopWdtOn) return;
+    if (loopWdtPausedAt) {
+      if (millis() - loopWdtPausedAt > 300000UL) loopWdtResume();
+      return;
+    }
+    esp_task_wdt_reset();
+  }
+  #define LOOP_WDT_RESET() loopWdtReset()
+#else
+  void loopWdtPause() {}
+  void loopWdtResume() {}
+  #define LOOP_WDT_RESET() do { } while (0)
+#endif
+
 #include "web-config.h"
 #include "wifi-config.h"
 
@@ -385,6 +430,7 @@ curRadio = 0;
   wifiManager.setHostname(hostName); // set a custom hostname, sets sta and ap dhcp client id for esp32, and sta for esp8266
   wifiManager.setTitle(hostName); // set the webapp title, default WiFiManager
   wifiManager.setRemoveDuplicateAPs(false); // You can also remove or show duplicate networks (default is remove). Use this function to show (or hide) all networks.
+  wifiManager.setPreSaveConfigCallback(loopWdtPause);   // WiFi connect after "save" blocks the loop
   wifiManager.setSaveConfigCallback(saveConfigCallback); // called when wifi settings have been changed and connection was successful ( or setBreakAfterConfig(true) )
 
   // set static ip
@@ -467,6 +513,9 @@ curRadio = 0;
 #endif
 
 RADIO_LED(false);
+#ifdef ESP32
+  loopWdtStart();
+#endif
 }
 
 
@@ -474,6 +523,7 @@ RADIO_LED(false);
 void loop() {
   wifiManager.process();
   webConfigLoop();
+  LOOP_WDT_RESET();
 
   static int aktVal = 0;
   bool state;

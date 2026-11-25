@@ -118,6 +118,88 @@ void handleFavicon() {
   wifiManager.server->send_P(200, "image/x-icon", tblFavicon, sizeof(tblFavicon));
 }
 
+#define STATUS_COLS 14
+
+static String jsonEsc(const String &in) {        // names are entered in the web configuration
+  String o;
+  for (uint16_t i = 0; i < in.length(); i++) {
+    const char c = in[i];
+    if (c == '"' || c == '\\') o += '\\';
+    if ((uint8_t)c >= 0x20) o += c;
+  }
+  return o;
+}
+
+static String statusTrace() {                   // last pulses of radio 1
+  String t;
+  for (uint8_t i = 0; i < RADIO_TRACE_LEN; i++) {
+    t += radioTrace[(radioTracePos + i) % RADIO_TRACE_LEN];
+    t += ' ';
+  }
+  return t;
+}
+
+static void statusValues(uint8_t r, String v[STATUS_COLS]) {   // one row of the status table (HTML and /api/status)
+  const uint8_t remRadio = curRadio;
+  curRadio = r;
+  v[0] = radioName(r);
+  v[1] = String(RADIO_PORT_BASE + r);
+#ifdef CMP_CC1101
+  if (hasCC1101) {
+    v[2] = String(ccFreq(), 3);
+    v[3] = wmbus ? (wmbus_t ? F("WMBus T") : F("WMBus S")) : FPSTR(modTxt[cc1101::ccmode & 7]);
+    const uint8_t raw = cc1101::getRSSI();     // current RSSI (noise floor if nothing is received)
+    v[5] = String((raw >= 128 ? ((int)raw - 256) / 2 : raw / 2) - 74) + F(" dBm");
+    v[13] = String(cc1101::getMARCSTATE() & 0x1F);
+  } else {
+    v[2] = '-';
+    v[3] = ccDisabled ? F("aus") : F("-");
+    v[5] = '-';
+    v[13] = '-';
+  }
+#else
+  v[2] = '-'; v[3] = F("ASK"); v[5] = '-'; v[13] = '-';
+#endif
+  v[4] = String(radioMsgCnt[r]);
+  v[6] = serverClients[r].connected() ? F("verbunden") : F("-");
+  v[7] = String(radioPulseCnt[r]);           // diagnostics: pin interrupts, FIFO fill, lost, polarity, spikes, missed edges
+  v[8] = String(FiFos[r].count());
+  v[9] = String(radioOvfCnt[r]);
+  v[10] = String(radioSameSign[r]);
+  v[11] = String(radioTrashCnt[r]);
+  v[12] = String(radioLevelRep[r]);
+  curRadio = remRadio;
+}
+
+void handleApiStatus() {                         // JSON for the live update of /custom
+  webKeepOpen = true;
+  String j;
+  j.reserve(1024);
+  j += F("{\"u\":"); j += getUptime();
+  j += F(",\"c\":"); j += radioCronCnt;
+  j += F(",\"l\":"); j += radioLoopRate;
+  j += F(",\"w\":"); j += WiFi.RSSI();
+  j += F(",\"h\":"); j += ESP.getFreeHeap();
+  j += F(",\"t\":\""); j += statusTrace(); j += F("\",\"r\":{");
+  bool first = true;
+  for (uint8_t r = 0; r < NUM_RADIO; r++) {
+    if (!radioUsed[r]) continue;
+    String v[STATUS_COLS];
+    statusValues(r, v);
+    if (!first) j += ',';
+    first = false;
+    j += '"'; j += r; j += F("\":[");
+    for (uint8_t k = 0; k < STATUS_COLS; k++) {
+      if (k) j += ',';
+      j += '"'; j += jsonEsc(v[k]); j += '"';
+    }
+    j += ']';
+  }
+  j += F("}}");
+  wifiManager.server->sendHeader(F("Cache-Control"), F("no-store"));
+  wifiManager.server->send(200, F("application/json"), j);
+}
+
 void handleSignal() {
   webKeepOpen = true;
   String page;
@@ -159,55 +241,34 @@ void handleSignal() {
   page += WiFi.RSSI();
   page += F(" dBm</dd>");
   page += F("</dl><table><tr><th>Modul</th><th>Port</th><th>Frequenz</th><th>Modus</th><th>Nachr.</th><th>RSSI</th><th>FHEM</th><th>Pulse</th><th>FIFO</th><th>Verlust</th><th>Vorz.</th><th>Kurz</th><th>Pegel</th><th>MARC</th></tr>");
-  const uint8_t remRadio = curRadio;
-  for (curRadio = 0; curRadio < NUM_RADIO; curRadio++) {
-    if (!radioUsed[curRadio]) continue;
-    page += F("<tr><td>"); page += radioName(curRadio);
-    page += F("</td><td>"); page += RADIO_PORT_BASE + curRadio;
-    page += F("</td><td>");
-#ifdef CMP_CC1101
-    if (hasCC1101) {
-      page += String(ccFreq(), 3);
-      page += F("</td><td>");
-      page += wmbus ? (wmbus_t ? F("WMBus T") : F("WMBus S")) : FPSTR(modTxt[cc1101::ccmode & 7]);
-      page += F("</td><td>"); page += radioMsgCnt[curRadio];
-      page += F("</td><td>");
-      const uint8_t raw = cc1101::getRSSI();     // current RSSI (noise floor if nothing is received)
-      page += (raw >= 128 ? ((int)raw - 256) / 2 : raw / 2) - 74;
-      page += F(" dBm");
-    } else {
-      page += ccDisabled ? F("aus</td><td>-") : F("-</td><td>-");
-      page += F("</td><td>"); page += radioMsgCnt[curRadio];
-      page += F("</td><td>-");
+  for (uint8_t r = 0; r < NUM_RADIO; r++) {
+    if (!radioUsed[r]) continue;
+    String v[STATUS_COLS];
+    statusValues(r, v);
+    page += F("<tr>");
+    for (uint8_t k = 0; k < STATUS_COLS; k++) {
+      page += F("<td id='s"); page += r; page += '_'; page += k; page += F("'>");
+      page += v[k];
+      page += F("</td>");
     }
-#else
-    page += F("-</td><td>ASK</td><td>"); page += radioMsgCnt[curRadio]; page += F("</td><td>-");
-#endif
-    page += F("</td><td>"); page += serverClients[curRadio].connected() ? F("verbunden") : F("-");
-    page += F("</td><td>"); page += radioPulseCnt[curRadio];      // diagnostics: pin interrupts, FIFO fill, CC1101 state (13 = RX)
-    page += F("</td><td>"); page += FiFos[curRadio].count();
-    page += F("</td><td>"); page += radioOvfCnt[curRadio];
-    page += F("</td><td>"); page += radioSameSign[curRadio];
-    page += F("</td><td>"); page += radioTrashCnt[curRadio];
-    page += F("</td><td>"); page += radioLevelRep[curRadio];
-    page += F("</td><td>");
-#ifdef CMP_CC1101
-    if (hasCC1101) page += cc1101::getMARCSTATE() & 0x1F; else
-#endif
-    page += '-';
-    page += F("</td></tr>");
+    page += F("</tr>");
   }
-  curRadio = remRadio;
-  page += F("</table><small>Nachr. = empfangene Nachrichten seit Neustart, RSSI = aktueller Pegel, Pulse = Flanken an GDO2, FIFO = unverarbeitete Pulse, Verlust = Pulse verloren (FIFO voll), Vorz. = zwei Pulse gleicher Polarität hintereinander, MARC = CC1101-Zustand (13 = RX). Cronjob: ");
+  page += F("</table><small>Nachr. = empfangene Nachrichten seit Neustart, RSSI = aktueller Pegel, Pulse = Flanken an GDO2, FIFO = unverarbeitete Pulse, Verlust = Pulse verloren (FIFO voll), Vorz. = zwei Pulse gleicher Polarität hintereinander, MARC = CC1101-Zustand (13 = RX).<br>Kurz = Pulse unter 90 us verworfen, Pegel = gleicher Pin-Pegel in zwei Interrupts (Flanke verpasst).<br>Uptime <span id='su'>");
+  page += getUptime();
+  page += F("</span> s, Cronjob <span id='sc'>");
   page += radioCronCnt;
-  page += F(", loop/s: ");
+  page += F("</span>, loop/s <span id='sl'>");
   page += radioLoopRate;
-  page += F("<br>Kurz = Pulse unter 90 us verworfen, Pegel = gleicher Pin-Pegel in zwei Interrupts (Flanke verpasst).<br>Letzte Pulse Modul 1 (us): ");
-  for (uint8_t i = 0; i < RADIO_TRACE_LEN; i++) {
-    page += radioTrace[(radioTracePos + i) % RADIO_TRACE_LEN];
-    page += ' ';
-  }
-  page += F("</small><hr>");
+  page += F("</span>, WiFi <span id='sw'>");
+  page += WiFi.RSSI();
+  page += F("</span> dBm <span id='so'></span><br>Letzte Pulse Modul 1 (us): <span id='st'>");
+  page += statusTrace();
+  page += F("</span></small><hr>");
+  page += F("<script>function sdUpd(){fetch('/api/status').then(r=>r.json()).then(d=>{"
+            "for(const r in d.r){d.r[r].forEach((v,k)=>{const e=document.getElementById('s'+r+'_'+k);if(e)e.textContent=v;});}"
+            "['u','c','l','w','t'].forEach(k=>{const e=document.getElementById('s'+k);if(e)e.textContent=d[k];});"
+            "document.getElementById('so').textContent='';}).catch(()=>{document.getElementById('so').textContent='(keine Verbindung)';});}"
+            "setInterval(sdUpd,2500);</script>");
   page += F("<p/>Github <a href='https://github.com/RFD-FHEM/SIGNALDuino'>https://github.com/RFD-FHEM/SIGNALDuino</a>");
   page += FPSTR(HTTP_END);
   wifiManager.server->send(200, FPSTR(HTTP_HEAD_CT), page);
@@ -218,6 +279,7 @@ void bindServerCallback() {
   webOtaBind();                                          // before WiFiManager registers its own /u
 #endif
   wifiManager.server->on("/custom", handleSignal);
+  wifiManager.server->on("/api/status", handleApiStatus);
   wifiManager.server->on("/sd", handleConfig);
   if (!wifiManager.getConfigPortalActive()) {           // connected: start page = SIGNAL-ESP config, AP mode: WiFiManager
     wifiManager.server->on("/", handleConfig);
@@ -240,6 +302,7 @@ void configModeCallback(WiFiManager *myWiFiManager) {
 }
 
 void saveConfigCallback() {
+  loopWdtResume();                                   // connected, see setPreSaveConfigCallback
   DBG_PRINTLN("Should save config");
   IPAddress ip(0, 0, 0, 0);
   IPAddress gateway(0, 0, 0, 0);
@@ -254,7 +317,9 @@ void saveConfigCallback() {
     WiFi.config(ip, gateway, subnet); // reset static ip, gw, sn
     wifiManager.disconnect();
     wifiManager.setSTAStaticIPConfig(ip, gateway, subnet); // wifimanager reset static ip, gw, sn
+    loopWdtPause();                                  // autoConnect blocks (connect timeout, config portal)
     bool res = wifiManager.autoConnect("AutoConnectAP", WM_AP_PASSWORD); // same AP password as first start ("" = open)
+    loopWdtResume();
     if (!res) {
       Serial.println(F("Failed to connect or hit timeout"));
       // ESP.restart();
@@ -286,6 +351,7 @@ String getParam(String name) {
 }
 
 void saveParamCallback() {
+  loopWdtResume();                                   // params saved, see setPreSaveConfigCallback
   //Serial.println("[CALLBACK] saveParamCallback fired");
   //Serial.println("PARAM theme = " + getParam("theme"));
   if (getParam("theme") == "1") {
